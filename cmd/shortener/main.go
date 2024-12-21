@@ -1,7 +1,9 @@
 package main
 
 import (
+	"io"
 	"net/http"
+	"net/url"
 	"time"
 
 	"golang.org/x/exp/rand"
@@ -16,7 +18,21 @@ func mainPage(w http.ResponseWriter, r *http.Request) {
 
 		val, ok := mylist[r.URL.Path]
 		if ok {
-			http.Redirect(w, r, val, http.StatusMovedPermanently)
+
+			// Проверим URL
+			parsedUrl, err := url.Parse(val)
+			if err != nil {
+				w.WriteHeader(http.StatusBadRequest)
+				return
+			}
+
+			if parsedUrl.Scheme == "" {
+				parsedUrl.Scheme = "http"
+			}
+			w.Header().Set("Location", parsedUrl.String())
+			w.WriteHeader(http.StatusTemporaryRedirect)
+			return
+			//http.Redirect(w, r, parsedUrl.String(), http.StatusTemporaryRedirect)
 		} else {
 			w.WriteHeader(http.StatusBadRequest)
 		}
@@ -27,17 +43,16 @@ func mainPage(w http.ResponseWriter, r *http.Request) {
 	// Получение сокращенной ссылки
 	if r.Method == http.MethodPost {
 		defer r.Body.Close()
-		myurl := make([]byte, 1024)
-		n, _ := r.Body.Read(myurl)
+
+		myurl, _ := io.ReadAll(r.Body)
 		ok := true
 		shortUrl := ""
 		for ok {
 			shortUrl = randStr(4)
 			_, ok = mylist["/"+shortUrl]
 		}
-		mylist["/"+shortUrl] = string(myurl[:n])
+		mylist["/"+shortUrl] = string(myurl)
 
-		//fmt.Print(string(myurl))
 		w.WriteHeader(http.StatusCreated)
 		w.Write([]byte(shortUrl))
 		return
