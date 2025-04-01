@@ -15,7 +15,7 @@ func TestMainPage(t *testing.T) {
 		w := httptest.NewRecorder()
 		mainPage(w, req)
 
-		shortURL := strings.TrimPrefix(string(w.Body.Bytes()), "http://localhost:8080")
+		shortURL := strings.TrimPrefix(w.Body.String(), "http://localhost:8080")
 
 		// Теперь пытаемся получить длинную ссылку
 		req = httptest.NewRequest(http.MethodGet, shortURL, nil)
