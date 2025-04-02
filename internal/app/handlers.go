@@ -35,5 +35,5 @@ func (h *Handler) CreateURL(w http.ResponseWriter, r *http.Request) {
 	shortURL := h.service.CreateURL(string(myurl))
 
 	w.WriteHeader(http.StatusCreated)
-	w.Write([]byte(h.service.config.BaseURL + shortURL))
+	w.Write([]byte(h.service.config.BaseURL + "/" + shortURL))
 }
