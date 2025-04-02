@@ -9,10 +9,12 @@ import (
 
 	"github.com/go-chi/chi"
 	"github.com/vvityuk/shortener/internal/app"
+	"github.com/vvityuk/shortener/internal/config"
 )
 
 func TestHandlers(t *testing.T) {
-	service := app.NewService()
+	cfg, _ := config.NewConfig()
+	service := app.NewService(cfg)
 	handler := app.NewHandler(service)
 
 	// Тест получения длинной ссылки

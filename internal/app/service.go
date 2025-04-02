@@ -3,16 +3,19 @@ package app
 import (
 	"time"
 
+	"github.com/vvityuk/shortener/internal/config"
 	"golang.org/x/exp/rand"
 )
 
 type Service struct {
-	urls map[string]string
+	urls   map[string]string
+	config *config.Config
 }
 
-func NewService() *Service {
+func NewService(cfg *config.Config) *Service {
 	return &Service{
-		urls: make(map[string]string),
+		urls:   make(map[string]string),
+		config: cfg,
 	}
 }
 
