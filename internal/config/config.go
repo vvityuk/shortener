@@ -7,29 +7,35 @@ import (
 )
 
 type Config struct {
-	ServerAddress string
-	BaseURL       string
+	ServerAddress   string
+	BaseURL         string
+	FileStoragePath string
 }
 
 func NewConfig() (*Config, error) {
 	cfg := &Config{}
 
-	// Значения по умолчанию
-	defaultServerAddress := "localhost:8080"
-	defaultBaseURL := "http://localhost:8080"
+	// Флаги
+	serverAddress := flag.String("a", "localhost:8080", "server address")
+	baseURL := flag.String("b", "http://localhost:8080", "base URL")
+	fileStoragePath := flag.String("f", "urls.json", "file storage path")
 
-	// Чтение флагов командной строки
-	flag.StringVar(&cfg.ServerAddress, "a", defaultServerAddress, "HTTP server address")
-	flag.StringVar(&cfg.BaseURL, "b", defaultBaseURL, "Base URL for shortened links")
 	flag.Parse()
 
-	// Чтение переменных окружения
+	// Переменные окружения
 	if envServerAddress := os.Getenv("SERVER_ADDRESS"); envServerAddress != "" {
-		cfg.ServerAddress = envServerAddress
+		*serverAddress = envServerAddress
 	}
 	if envBaseURL := os.Getenv("BASE_URL"); envBaseURL != "" {
-		cfg.BaseURL = envBaseURL
+		*baseURL = envBaseURL
 	}
+	if envFileStoragePath := os.Getenv("FILE_STORAGE_PATH"); envFileStoragePath != "" {
+		*fileStoragePath = envFileStoragePath
+	}
+
+	cfg.ServerAddress = *serverAddress
+	cfg.BaseURL = *baseURL
+	cfg.FileStoragePath = *fileStoragePath
 
 	if err := cfg.validate(); err != nil {
 		return nil, fmt.Errorf("invalid config: %w", err)

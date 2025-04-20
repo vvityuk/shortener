@@ -24,7 +24,12 @@ func main() {
 		panic("Failed to initialize config")
 	}
 	// Инициализация сервиса и обработчиков
-	service := app.NewService(cfg)
+	service, err := app.NewService(cfg)
+	if err != nil {
+		panic("Failed to initialize service")
+	}
+	defer service.Close()
+
 	handler := app.NewHandler(service)
 
 	r := chi.NewRouter()
