@@ -1,6 +1,7 @@
 package app
 
 import (
+	"encoding/json"
 	"io"
 	"net/http"
 
@@ -9,6 +10,14 @@ import (
 
 type Handler struct {
 	service *Service
+}
+
+type shortenRequest struct {
+	URL string `json:"url"`
+}
+
+type shortenResponse struct {
+	Result string `json:"result"`
 }
 
 func NewHandler(service *Service) *Handler {
@@ -36,4 +45,28 @@ func (h *Handler) CreateURL(w http.ResponseWriter, r *http.Request) {
 
 	w.WriteHeader(http.StatusCreated)
 	w.Write([]byte(h.service.config.BaseURL + "/" + shortURL))
+}
+
+func (h *Handler) ShortenURL(w http.ResponseWriter, r *http.Request) {
+	defer r.Body.Close()
+
+	var req shortenRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if req.URL == "" {
+		http.Error(w, "URL is required", http.StatusBadRequest)
+		return
+	}
+
+	shortURL := h.service.CreateURL(req.URL)
+	resp := shortenResponse{
+		Result: h.service.config.BaseURL + "/" + shortURL,
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(resp)
 }

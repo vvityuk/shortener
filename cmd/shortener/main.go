@@ -32,6 +32,7 @@ func main() {
 	// Роуты
 	r.Get("/{shortCode}", handler.GetURL)
 	r.Post("/", handler.CreateURL)
+	r.Post("/api/shorten", handler.ShortenURL)
 
 	// Запуск сервера
 	err = http.ListenAndServe(cfg.ServerAddress, r)
