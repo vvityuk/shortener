@@ -29,6 +29,8 @@ func main() {
 
 	r := chi.NewRouter()
 	r.Use(middleware.LoggingMiddleware(logger))
+	r.Use(middleware.CompressResponse)
+	r.Use(middleware.DecompressRequest)
 	// Роуты
 	r.Get("/{shortCode}", handler.GetURL)
 	r.Post("/", handler.CreateURL)
