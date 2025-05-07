@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/vvityuk/shortener/internal/config"
+	"github.com/vvityuk/shortener/internal/storage/postgres"
 	"golang.org/x/exp/rand"
 )
 
@@ -14,15 +15,28 @@ type Service struct {
 }
 
 func NewService(cfg *config.Config) (*Service, error) {
-	storage, err := NewStorage(cfg.FileStoragePath)
-	if err != nil {
-		return nil, err
+	var storage Storage
+	var err error
+
+	// Пробуем PostgreSQL
+	if cfg.DatabaseDSN != "" {
+		storage, err = postgres.New(cfg.DatabaseDSN)
+		if err == nil {
+			return &Service{storage: storage, config: cfg}, nil
+		}
 	}
 
-	return &Service{
-		storage: storage,
-		config:  cfg,
-	}, nil
+	// Пробуем файловое хранилище
+	if cfg.FileStoragePath != "" {
+		storage, err = NewStorage(cfg.FileStoragePath)
+		if err == nil {
+			return &Service{storage: storage, config: cfg}, nil
+		}
+	}
+
+	// Используем хранилище в памяти
+	storage = NewMemoryStorage()
+	return &Service{storage: storage, config: cfg}, nil
 }
 
 func (s *Service) GetURL(shortCode string) (string, bool) {

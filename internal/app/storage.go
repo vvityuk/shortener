@@ -78,3 +78,31 @@ func (s *FileStorage) Close() error {
 func (s *FileStorage) Ping(ctx context.Context) error {
 	return nil
 }
+
+type MemoryStorage struct {
+	urls map[string]string
+}
+
+func NewMemoryStorage() *MemoryStorage {
+	return &MemoryStorage{
+		urls: make(map[string]string),
+	}
+}
+
+func (s *MemoryStorage) Get(key string) (string, bool) {
+	val, ok := s.urls[key]
+	return val, ok
+}
+
+func (s *MemoryStorage) Save(key, value string) error {
+	s.urls[key] = value
+	return nil
+}
+
+func (s *MemoryStorage) Close() error {
+	return nil
+}
+
+func (s *MemoryStorage) Ping(ctx context.Context) error {
+	return nil
+}
