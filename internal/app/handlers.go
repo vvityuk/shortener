@@ -112,13 +112,14 @@ func (h *Handler) BatchShortenURL(w http.ResponseWriter, r *http.Request) {
 		items[item.CorrelationID] = item.OriginalURL
 	}
 
-	if err := h.service.BatchCreateURL(items); err != nil {
+	result, err := h.service.BatchCreateURL(items)
+	if err != nil {
 		http.Error(w, "Failed to create short URLs", http.StatusInternalServerError)
 		return
 	}
 
-	resp := make([]batchResponse, 0, len(items))
-	for correlationID, shortURL := range items {
+	resp := make([]batchResponse, 0, len(result))
+	for correlationID, shortURL := range result {
 		resp = append(resp, batchResponse{
 			CorrelationID: correlationID,
 			ShortURL:      h.service.config.BaseURL + "/" + shortURL,
