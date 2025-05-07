@@ -59,6 +59,29 @@ func (s *Storage) Save(key, value string) error {
 	return err
 }
 
+func (s *Storage) BatchSave(items map[string]string) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	stmt, err := tx.Prepare("INSERT INTO urls (short_url, original_url) VALUES ($1, $2)")
+	if err != nil {
+		return err
+	}
+	defer stmt.Close()
+
+	for key, value := range items {
+		_, err = stmt.Exec(key, value)
+		if err != nil {
+			return err
+		}
+	}
+
+	return tx.Commit()
+}
+
 func (s *Storage) Close() error {
 	return s.db.Close()
 }

@@ -78,3 +78,18 @@ func (s *Service) Close() error {
 func (s *Service) Ping(ctx context.Context) error {
 	return s.storage.Ping(ctx)
 }
+
+func (s *Service) BatchCreateURL(items map[string]string) error {
+	urls := make(map[string]string)
+	for correlationID, originalURL := range items {
+		shortURL := s.randStr(4)
+		urls[correlationID] = shortURL
+		items[correlationID] = originalURL
+	}
+
+	if err := s.storage.BatchSave(urls); err != nil {
+		return err
+	}
+
+	return nil
+}

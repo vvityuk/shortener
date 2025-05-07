@@ -9,6 +9,7 @@ import (
 type Storage interface {
 	Get(key string) (string, bool)
 	Save(key, value string) error
+	BatchSave(items map[string]string) error
 	Close() error
 	Ping(ctx context.Context) error
 }
@@ -43,6 +44,13 @@ func (s *FileStorage) Get(key string) (string, bool) {
 
 func (s *FileStorage) Save(key, value string) error {
 	s.urls[key] = value
+	return s.save()
+}
+
+func (s *FileStorage) BatchSave(items map[string]string) error {
+	for key, value := range items {
+		s.urls[key] = value
+	}
 	return s.save()
 }
 
@@ -96,6 +104,13 @@ func (s *MemoryStorage) Get(key string) (string, bool) {
 
 func (s *MemoryStorage) Save(key, value string) error {
 	s.urls[key] = value
+	return nil
+}
+
+func (s *MemoryStorage) BatchSave(items map[string]string) error {
+	for key, value := range items {
+		s.urls[key] = value
+	}
 	return nil
 }
 

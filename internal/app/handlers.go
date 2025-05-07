@@ -20,6 +20,16 @@ type shortenResponse struct {
 	Result string `json:"result"`
 }
 
+type batchRequest struct {
+	CorrelationID string `json:"correlation_id"`
+	OriginalURL   string `json:"original_url"`
+}
+
+type batchResponse struct {
+	CorrelationID string `json:"correlation_id"`
+	ShortURL      string `json:"short_url"`
+}
+
 func NewHandler(service *Service) *Handler {
 	return &Handler{
 		service: service,
@@ -77,4 +87,45 @@ func (h *Handler) PingDB(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusOK)
+}
+
+func (h *Handler) BatchShortenURL(w http.ResponseWriter, r *http.Request) {
+	defer r.Body.Close()
+
+	var req []batchRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if len(req) == 0 {
+		http.Error(w, "Empty batch", http.StatusBadRequest)
+		return
+	}
+
+	items := make(map[string]string)
+	for _, item := range req {
+		if item.OriginalURL == "" {
+			http.Error(w, "URL is required", http.StatusBadRequest)
+			return
+		}
+		items[item.CorrelationID] = item.OriginalURL
+	}
+
+	if err := h.service.BatchCreateURL(items); err != nil {
+		http.Error(w, "Failed to create short URLs", http.StatusInternalServerError)
+		return
+	}
+
+	resp := make([]batchResponse, 0, len(items))
+	for correlationID, shortURL := range items {
+		resp = append(resp, batchResponse{
+			CorrelationID: correlationID,
+			ShortURL:      h.service.config.BaseURL + "/" + shortURL,
+		})
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(resp)
 }
