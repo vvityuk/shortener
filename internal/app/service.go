@@ -43,7 +43,7 @@ func (s *Service) GetURL(shortCode string) (string, bool) {
 	return s.storage.Get(shortCode)
 }
 
-func (s *Service) CreateURL(longURL string) (string, error) {
+func (s *Service) CreateURL(longURL string) (string, bool, error) {
 	shortURL := s.randStr(4)
 	return s.storage.Save(shortURL, longURL)
 }

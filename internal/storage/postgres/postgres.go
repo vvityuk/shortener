@@ -55,25 +55,29 @@ func (s *Storage) Get(key string) (string, bool) {
 	return originalURL, true
 }
 
-func (s *Storage) Save(key, value string) (string, error) {
+func (s *Storage) Save(key, value string) (string, bool, error) {
 	var shortURL string
+	var isNew bool
 	query := `
 		WITH upsert AS (
 			INSERT INTO urls (short_url, original_url)
 			VALUES ($1, $2)
 			ON CONFLICT (original_url) DO NOTHING
-			RETURNING short_url
+			RETURNING short_url, true as is_new
 		)
-		SELECT short_url FROM upsert
+		SELECT short_url, COALESCE(is_new, false) as is_new 
+		FROM upsert
 		UNION ALL
-		SELECT short_url FROM urls WHERE original_url = $2
+		SELECT short_url, false as is_new 
+		FROM urls 
+		WHERE original_url = $2
 		LIMIT 1
 	`
-	err := s.db.QueryRow(query, key, value).Scan(&shortURL)
+	err := s.db.QueryRow(query, key, value).Scan(&shortURL, &isNew)
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
-	return shortURL, nil
+	return shortURL, isNew, nil
 }
 
 func (s *Storage) BatchSave(items map[string]string) error {

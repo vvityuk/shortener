@@ -8,7 +8,7 @@ import (
 
 type Storage interface {
 	Get(key string) (string, bool)
-	Save(key, value string) (string, error)
+	Save(key, value string) (string, bool, error)
 	GetByOriginalURL(originalURL string) (string, bool)
 	BatchSave(items map[string]string) error
 	Close() error
@@ -43,15 +43,15 @@ func (s *FileStorage) Get(key string) (string, bool) {
 	return val, ok
 }
 
-func (s *FileStorage) Save(key, value string) (string, error) {
+func (s *FileStorage) Save(key, value string) (string, bool, error) {
 	if existingKey, ok := s.getKeyByValue(value); ok {
-		return existingKey, nil
+		return existingKey, false, nil
 	}
 	s.urls[key] = value
 	if err := s.save(); err != nil {
-		return "", err
+		return "", false, err
 	}
-	return key, nil
+	return key, true, nil
 }
 
 func (s *FileStorage) GetByOriginalURL(originalURL string) (string, bool) {
@@ -127,12 +127,12 @@ func (s *MemoryStorage) Get(key string) (string, bool) {
 	return val, ok
 }
 
-func (s *MemoryStorage) Save(key, value string) (string, error) {
+func (s *MemoryStorage) Save(key, value string) (string, bool, error) {
 	if existingKey, ok := s.getKeyByValue(value); ok {
-		return existingKey, nil
+		return existingKey, false, nil
 	}
 	s.urls[key] = value
-	return key, nil
+	return key, true, nil
 }
 
 func (s *MemoryStorage) GetByOriginalURL(originalURL string) (string, bool) {
