@@ -3,8 +3,11 @@ package postgres
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 
+	"github.com/jackc/pgerrcode"
+	"github.com/jackc/pgx/v5/pgconn"
 	_ "github.com/jackc/pgx/v5/stdlib"
 )
 
@@ -66,6 +69,14 @@ func (s *Storage) Save(key, value string) (string, error) {
 	`
 	err := s.db.QueryRow(query, key, value).Scan(&shortURL)
 	if err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == pgerrcode.UniqueViolation {
+			existingURL, ok := s.GetByOriginalURL(value)
+			if !ok {
+				return "", fmt.Errorf("failed to get existing URL: %w", err)
+			}
+			return existingURL, nil
+		}
 		return "", err
 	}
 	return shortURL, nil
