@@ -57,12 +57,6 @@ func (h *Handler) CreateURL(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if existingURL, ok := h.service.storage.GetByOriginalURL(string(myurl)); ok {
-		w.WriteHeader(http.StatusConflict)
-		w.Write([]byte(h.service.config.BaseURL + "/" + existingURL))
-		return
-	}
-
 	w.WriteHeader(http.StatusCreated)
 	w.Write([]byte(h.service.config.BaseURL + "/" + shortURL))
 }
@@ -84,16 +78,6 @@ func (h *Handler) ShortenURL(w http.ResponseWriter, r *http.Request) {
 	shortURL, err := h.service.CreateURL(req.URL)
 	if err != nil {
 		http.Error(w, "Failed to create short URL", http.StatusInternalServerError)
-		return
-	}
-
-	if existingURL, ok := h.service.storage.GetByOriginalURL(req.URL); ok {
-		resp := shortenResponse{
-			Result: h.service.config.BaseURL + "/" + existingURL,
-		}
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusConflict)
-		json.NewEncoder(w).Encode(resp)
 		return
 	}
 

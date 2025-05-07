@@ -3,11 +3,8 @@ package postgres
 import (
 	"context"
 	"database/sql"
-	"errors"
 	"fmt"
 
-	"github.com/jackc/pgerrcode"
-	"github.com/jackc/pgx/v5/pgconn"
 	_ "github.com/jackc/pgx/v5/stdlib"
 )
 
@@ -61,22 +58,19 @@ func (s *Storage) Get(key string) (string, bool) {
 func (s *Storage) Save(key, value string) (string, error) {
 	var shortURL string
 	query := `
-		INSERT INTO urls (short_url, original_url)
-		VALUES ($1, $2)
-		ON CONFLICT (original_url) DO UPDATE
-		SET short_url = urls.short_url
-		RETURNING short_url
+		WITH upsert AS (
+			INSERT INTO urls (short_url, original_url)
+			VALUES ($1, $2)
+			ON CONFLICT (original_url) DO NOTHING
+			RETURNING short_url
+		)
+		SELECT short_url FROM upsert
+		UNION ALL
+		SELECT short_url FROM urls WHERE original_url = $2
+		LIMIT 1
 	`
 	err := s.db.QueryRow(query, key, value).Scan(&shortURL)
 	if err != nil {
-		var pgErr *pgconn.PgError
-		if errors.As(err, &pgErr) && pgErr.Code == pgerrcode.UniqueViolation {
-			existingURL, ok := s.GetByOriginalURL(value)
-			if !ok {
-				return "", fmt.Errorf("failed to get existing URL: %w", err)
-			}
-			return existingURL, nil
-		}
 		return "", err
 	}
 	return shortURL, nil
