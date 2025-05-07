@@ -70,3 +70,11 @@ func (h *Handler) ShortenURL(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusCreated)
 	json.NewEncoder(w).Encode(resp)
 }
+
+func (h *Handler) PingDB(w http.ResponseWriter, r *http.Request) {
+	if err := h.service.Ping(r.Context()); err != nil {
+		http.Error(w, "Database connection error", http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+}

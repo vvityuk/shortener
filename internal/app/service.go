@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"time"
 
 	"github.com/vvityuk/shortener/internal/config"
@@ -8,7 +9,7 @@ import (
 )
 
 type Service struct {
-	storage *Storage
+	storage Storage
 	config  *config.Config
 }
 
@@ -58,4 +59,8 @@ func (s *Service) randStr(n int) string {
 
 func (s *Service) Close() error {
 	return s.storage.Close()
+}
+
+func (s *Service) Ping(ctx context.Context) error {
+	return s.storage.Ping(ctx)
 }

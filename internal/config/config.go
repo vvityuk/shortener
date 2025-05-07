@@ -10,6 +10,7 @@ type Config struct {
 	ServerAddress   string
 	BaseURL         string
 	FileStoragePath string
+	DatabaseDSN     string
 }
 
 func NewConfig() (*Config, error) {
@@ -19,6 +20,7 @@ func NewConfig() (*Config, error) {
 	serverAddress := flag.String("a", "localhost:8080", "server address")
 	baseURL := flag.String("b", "http://localhost:8080", "base URL")
 	fileStoragePath := flag.String("f", "urls.json", "file storage path")
+	databaseDSN := flag.String("d", "", "database DSN")
 
 	flag.Parse()
 
@@ -32,10 +34,14 @@ func NewConfig() (*Config, error) {
 	if envFileStoragePath := os.Getenv("FILE_STORAGE_PATH"); envFileStoragePath != "" {
 		*fileStoragePath = envFileStoragePath
 	}
+	if envDatabaseDSN := os.Getenv("DATABASE_DSN"); envDatabaseDSN != "" {
+		*databaseDSN = envDatabaseDSN
+	}
 
 	cfg.ServerAddress = *serverAddress
 	cfg.BaseURL = *baseURL
 	cfg.FileStoragePath = *fileStoragePath
+	cfg.DatabaseDSN = *databaseDSN
 
 	if err := cfg.validate(); err != nil {
 		return nil, fmt.Errorf("invalid config: %w", err)
