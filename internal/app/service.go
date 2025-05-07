@@ -8,20 +8,24 @@ import (
 )
 
 type Service struct {
-	urls   map[string]string
-	config *config.Config
+	storage *Storage
+	config  *config.Config
 }
 
-func NewService(cfg *config.Config) *Service {
-	return &Service{
-		urls:   make(map[string]string),
-		config: cfg,
+func NewService(cfg *config.Config) (*Service, error) {
+	storage, err := NewStorage(cfg.FileStoragePath)
+	if err != nil {
+		return nil, err
 	}
+
+	return &Service{
+		storage: storage,
+		config:  cfg,
+	}, nil
 }
 
 func (s *Service) GetURL(shortCode string) (string, bool) {
-	val, ok := s.urls["/"+shortCode]
-	return val, ok
+	return s.storage.Get(shortCode)
 }
 
 func (s *Service) CreateURL(longURL string) string {
@@ -29,9 +33,15 @@ func (s *Service) CreateURL(longURL string) string {
 	shortURL := ""
 	for ok {
 		shortURL = s.randStr(4)
-		_, ok = s.urls["/"+shortURL]
+		_, ok = s.storage.Get(shortURL)
 	}
-	s.urls["/"+shortURL] = longURL
+
+	if err := s.storage.Save(shortURL, longURL); err != nil {
+		// В случае ошибки сохранения просто возвращаем shortURL
+		// URL уже сохранен в памяти
+		return shortURL
+	}
+
 	return shortURL
 }
 
@@ -44,4 +54,8 @@ func (s *Service) randStr(n int) string {
 		b[i] = letters[rnd.Intn(len(letters))]
 	}
 	return string(b)
+}
+
+func (s *Service) Close() error {
+	return s.storage.Close()
 }
