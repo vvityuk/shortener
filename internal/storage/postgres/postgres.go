@@ -35,7 +35,8 @@ func createTables(db *sql.DB) error {
 			id SERIAL PRIMARY KEY,
 			short_url VARCHAR(255) UNIQUE NOT NULL,
 			original_url TEXT NOT NULL,
-			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+			UNIQUE(original_url)
 		);
 	`
 	_, err := db.Exec(query)
@@ -54,9 +55,20 @@ func (s *Storage) Get(key string) (string, bool) {
 	return originalURL, true
 }
 
-func (s *Storage) Save(key, value string) error {
-	_, err := s.db.Exec("INSERT INTO urls (short_url, original_url) VALUES ($1, $2)", key, value)
-	return err
+func (s *Storage) Save(key, value string) (string, error) {
+	var shortURL string
+	query := `
+		INSERT INTO urls (short_url, original_url)
+		VALUES ($1, $2)
+		ON CONFLICT (original_url) DO UPDATE
+		SET short_url = urls.short_url
+		RETURNING short_url
+	`
+	err := s.db.QueryRow(query, key, value).Scan(&shortURL)
+	if err != nil {
+		return "", err
+	}
+	return shortURL, nil
 }
 
 func (s *Storage) BatchSave(items map[string]string) error {
@@ -88,4 +100,16 @@ func (s *Storage) Close() error {
 
 func (s *Storage) Ping(ctx context.Context) error {
 	return s.db.PingContext(ctx)
+}
+
+func (s *Storage) GetByOriginalURL(originalURL string) (string, bool) {
+	var shortURL string
+	err := s.db.QueryRow("SELECT short_url FROM urls WHERE original_url = $1", originalURL).Scan(&shortURL)
+	if err == sql.ErrNoRows {
+		return "", false
+	}
+	if err != nil {
+		return "", false
+	}
+	return shortURL, true
 }

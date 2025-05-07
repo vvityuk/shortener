@@ -43,21 +43,9 @@ func (s *Service) GetURL(shortCode string) (string, bool) {
 	return s.storage.Get(shortCode)
 }
 
-func (s *Service) CreateURL(longURL string) string {
-	ok := true
-	shortURL := ""
-	for ok {
-		shortURL = s.randStr(4)
-		_, ok = s.storage.Get(shortURL)
-	}
-
-	if err := s.storage.Save(shortURL, longURL); err != nil {
-		// В случае ошибки сохранения просто возвращаем shortURL
-		// URL уже сохранен в памяти
-		return shortURL
-	}
-
-	return shortURL
+func (s *Service) CreateURL(longURL string) (string, error) {
+	shortURL := s.randStr(4)
+	return s.storage.Save(shortURL, longURL)
 }
 
 func (s *Service) randStr(n int) string {

@@ -51,7 +51,11 @@ func (h *Handler) CreateURL(w http.ResponseWriter, r *http.Request) {
 	defer r.Body.Close()
 
 	myurl, _ := io.ReadAll(r.Body)
-	shortURL := h.service.CreateURL(string(myurl))
+	shortURL, err := h.service.CreateURL(string(myurl))
+	if err != nil {
+		http.Error(w, "Failed to create short URL", http.StatusInternalServerError)
+		return
+	}
 
 	w.WriteHeader(http.StatusCreated)
 	w.Write([]byte(h.service.config.BaseURL + "/" + shortURL))
@@ -71,7 +75,12 @@ func (h *Handler) ShortenURL(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	shortURL := h.service.CreateURL(req.URL)
+	shortURL, err := h.service.CreateURL(req.URL)
+	if err != nil {
+		http.Error(w, "Failed to create short URL", http.StatusInternalServerError)
+		return
+	}
+
 	resp := shortenResponse{
 		Result: h.service.config.BaseURL + "/" + shortURL,
 	}

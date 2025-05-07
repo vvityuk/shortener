@@ -8,7 +8,8 @@ import (
 
 type Storage interface {
 	Get(key string) (string, bool)
-	Save(key, value string) error
+	Save(key, value string) (string, error)
+	GetByOriginalURL(originalURL string) (string, bool)
 	BatchSave(items map[string]string) error
 	Close() error
 	Ping(ctx context.Context) error
@@ -42,9 +43,33 @@ func (s *FileStorage) Get(key string) (string, bool) {
 	return val, ok
 }
 
-func (s *FileStorage) Save(key, value string) error {
+func (s *FileStorage) Save(key, value string) (string, error) {
+	if existingKey, ok := s.getKeyByValue(value); ok {
+		return existingKey, nil
+	}
 	s.urls[key] = value
-	return s.save()
+	if err := s.save(); err != nil {
+		return "", err
+	}
+	return key, nil
+}
+
+func (s *FileStorage) GetByOriginalURL(originalURL string) (string, bool) {
+	for key, value := range s.urls {
+		if value == originalURL {
+			return key, true
+		}
+	}
+	return "", false
+}
+
+func (s *FileStorage) getKeyByValue(value string) (string, bool) {
+	for key, val := range s.urls {
+		if val == value {
+			return key, true
+		}
+	}
+	return "", false
 }
 
 func (s *FileStorage) BatchSave(items map[string]string) error {
@@ -102,9 +127,30 @@ func (s *MemoryStorage) Get(key string) (string, bool) {
 	return val, ok
 }
 
-func (s *MemoryStorage) Save(key, value string) error {
+func (s *MemoryStorage) Save(key, value string) (string, error) {
+	if existingKey, ok := s.getKeyByValue(value); ok {
+		return existingKey, nil
+	}
 	s.urls[key] = value
-	return nil
+	return key, nil
+}
+
+func (s *MemoryStorage) GetByOriginalURL(originalURL string) (string, bool) {
+	for key, value := range s.urls {
+		if value == originalURL {
+			return key, true
+		}
+	}
+	return "", false
+}
+
+func (s *MemoryStorage) getKeyByValue(value string) (string, bool) {
+	for key, val := range s.urls {
+		if val == value {
+			return key, true
+		}
+	}
+	return "", false
 }
 
 func (s *MemoryStorage) BatchSave(items map[string]string) error {
