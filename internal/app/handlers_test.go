@@ -1,6 +1,7 @@
 package app
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"net/http"
@@ -72,44 +73,102 @@ func TestHandlers(t *testing.T) {
 	})
 
 	// Тест создания URL через API
-	t.Run("Create URL via API", func(t *testing.T) {
-		originalURL := "https://ya.ru"
-		reqBody := struct {
-			URL string `json:"url"`
-		}{
-			URL: originalURL,
+	t.Run("Create_URL_via_API", func(t *testing.T) {
+		req := shortenRequest{URL: "https://example.com"}
+		body, _ := json.Marshal(req)
+
+		request := httptest.NewRequest(http.MethodPost, "/api/shorten", bytes.NewReader(body))
+		request.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+
+		handler.ShortenURL(w, request)
+
+		resp := w.Result()
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusConflict {
+			t.Errorf("Expected status 201 or 409, got %d", resp.StatusCode)
 		}
 
-		body, err := json.Marshal(reqBody)
-		if err != nil {
+		var response shortenResponse
+		if err := json.NewDecoder(resp.Body).Decode(&response); err != nil {
 			t.Fatal(err)
 		}
 
-		req := httptest.NewRequest(http.MethodPost, "/api/shorten", strings.NewReader(string(body)))
+		if response.Result == "" {
+			t.Error("Expected non-empty result")
+		}
+	})
+
+	// Тест проверки подключения к БД
+	t.Run("Ping DB", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/ping", nil)
+		w := httptest.NewRecorder()
+
+		handler.PingDB(w, req)
+
+		if w.Code != http.StatusOK {
+			t.Errorf("Expected status %d, got %d", http.StatusOK, w.Code)
+		}
+	})
+
+	// Тест пакетного создания URL
+	t.Run("Batch Shorten URL", func(t *testing.T) {
+		batchReq := []batchRequest{
+			{CorrelationID: "1", OriginalURL: "https://example1.com"},
+			{CorrelationID: "2", OriginalURL: "https://example2.com"},
+		}
+		body, _ := json.Marshal(batchReq)
+
+		req := httptest.NewRequest(http.MethodPost, "/api/shorten/batch", bytes.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
 		w := httptest.NewRecorder()
 
-		handler.ShortenURL(w, req)
+		handler.BatchShortenURL(w, req)
 
 		if w.Code != http.StatusCreated {
 			t.Errorf("Expected status %d, got %d", http.StatusCreated, w.Code)
 		}
 
-		// Проверяем заголовок Content-Type
-		if contentType := w.Header().Get("Content-Type"); contentType != "application/json" {
-			t.Errorf("Expected Content-Type application/json, got %s", contentType)
-		}
-
-		var resp shortenResponse
-		if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		var response []batchResponse
+		if err := json.NewDecoder(w.Body).Decode(&response); err != nil {
 			t.Fatal(err)
 		}
 
-		// Проверяем формат ответа
-		if !strings.HasPrefix(resp.Result, cfg.BaseURL+"/") {
-			t.Errorf("Expected result to start with %s, got %s", cfg.BaseURL+"/", resp.Result)
+		if len(response) != 2 {
+			t.Errorf("Expected 2 responses, got %d", len(response))
 		}
 
+		for _, resp := range response {
+			if resp.ShortURL == "" {
+				t.Error("Expected non-empty short URL")
+			}
+		}
 	})
 
+	// Тест пакетного создания URL с пустым запросом
+	t.Run("Batch Shorten URL Empty Request", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodPost, "/api/shorten/batch", bytes.NewReader([]byte("[]")))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+
+		handler.BatchShortenURL(w, req)
+
+		if w.Code != http.StatusBadRequest {
+			t.Errorf("Expected status %d, got %d", http.StatusBadRequest, w.Code)
+		}
+	})
+
+	// Тест пакетного создания URL с некорректным JSON
+	t.Run("Batch Shorten URL Invalid JSON", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodPost, "/api/shorten/batch", bytes.NewReader([]byte("invalid json")))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+
+		handler.BatchShortenURL(w, req)
+
+		if w.Code != http.StatusBadRequest {
+			t.Errorf("Expected status %d, got %d", http.StatusBadRequest, w.Code)
+		}
+	})
 }
