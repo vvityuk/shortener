@@ -1,35 +1,36 @@
 package app
 
 import (
+	"context"
 	"encoding/json"
 	"os"
-	"sync"
 )
 
-type URLRecord struct {
-	UUID        string `json:"uuid"`
-	ShortURL    string `json:"short_url"`
-	OriginalURL string `json:"original_url"`
+type Storage interface {
+	Get(key string) (string, bool)
+	Save(key, value string) (string, bool, error)
+	GetByOriginalURL(originalURL string) (string, bool)
+	BatchSave(items map[string]string) error
+	Close() error
+	Ping(ctx context.Context) error
 }
 
-type Storage struct {
-	mu   sync.RWMutex
+type FileStorage struct {
 	urls map[string]string
 	file *os.File
 }
 
-func NewStorage(filePath string) (*Storage, error) {
-	file, err := os.OpenFile(filePath, os.O_RDWR|os.O_CREATE|os.O_APPEND, 0644)
+func NewStorage(filePath string) (*FileStorage, error) {
+	file, err := os.OpenFile(filePath, os.O_RDWR|os.O_CREATE, 0644)
 	if err != nil {
 		return nil, err
 	}
 
-	storage := &Storage{
+	storage := &FileStorage{
 		urls: make(map[string]string),
 		file: file,
 	}
 
-	// Загружаем существующие URL из файла
 	if err := storage.load(); err != nil {
 		return nil, err
 	}
@@ -37,54 +38,132 @@ func NewStorage(filePath string) (*Storage, error) {
 	return storage, nil
 }
 
-func (s *Storage) load() error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	// Перемещаем указатель в начало файла
-	if _, err := s.file.Seek(0, 0); err != nil {
-		return err
-	}
-
-	decoder := json.NewDecoder(s.file)
-	for decoder.More() {
-		var record URLRecord
-		if err := decoder.Decode(&record); err != nil {
-			return err
-		}
-		s.urls[record.ShortURL] = record.OriginalURL
-	}
-
-	return nil
-}
-
-func (s *Storage) Save(shortURL, originalURL string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	record := URLRecord{
-		UUID:        shortURL, // Используем shortURL как UUID
-		ShortURL:    shortURL,
-		OriginalURL: originalURL,
-	}
-
-	encoder := json.NewEncoder(s.file)
-	if err := encoder.Encode(record); err != nil {
-		return err
-	}
-
-	s.urls[shortURL] = originalURL
-	return nil
-}
-
-func (s *Storage) Get(shortURL string) (string, bool) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
-	val, ok := s.urls[shortURL]
+func (s *FileStorage) Get(key string) (string, bool) {
+	val, ok := s.urls[key]
 	return val, ok
 }
 
-func (s *Storage) Close() error {
+func (s *FileStorage) Save(key, value string) (string, bool, error) {
+	if existingKey, ok := s.getKeyByValue(value); ok {
+		return existingKey, false, nil
+	}
+	s.urls[key] = value
+	if err := s.save(); err != nil {
+		return "", false, err
+	}
+	return key, true, nil
+}
+
+func (s *FileStorage) GetByOriginalURL(originalURL string) (string, bool) {
+	for key, value := range s.urls {
+		if value == originalURL {
+			return key, true
+		}
+	}
+	return "", false
+}
+
+func (s *FileStorage) getKeyByValue(value string) (string, bool) {
+	for key, val := range s.urls {
+		if val == value {
+			return key, true
+		}
+	}
+	return "", false
+}
+
+func (s *FileStorage) BatchSave(items map[string]string) error {
+	for key, value := range items {
+		s.urls[key] = value
+	}
+	return s.save()
+}
+
+func (s *FileStorage) load() error {
+	stat, err := s.file.Stat()
+	if err != nil {
+		return err
+	}
+
+	if stat.Size() == 0 {
+		return nil
+	}
+
+	decoder := json.NewDecoder(s.file)
+	return decoder.Decode(&s.urls)
+}
+
+func (s *FileStorage) save() error {
+	if err := s.file.Truncate(0); err != nil {
+		return err
+	}
+	if _, err := s.file.Seek(0, 0); err != nil {
+		return err
+	}
+	encoder := json.NewEncoder(s.file)
+	return encoder.Encode(s.urls)
+}
+
+func (s *FileStorage) Close() error {
 	return s.file.Close()
+}
+
+func (s *FileStorage) Ping(ctx context.Context) error {
+	return nil
+}
+
+type MemoryStorage struct {
+	urls map[string]string
+}
+
+func NewMemoryStorage() *MemoryStorage {
+	return &MemoryStorage{
+		urls: make(map[string]string),
+	}
+}
+
+func (s *MemoryStorage) Get(key string) (string, bool) {
+	val, ok := s.urls[key]
+	return val, ok
+}
+
+func (s *MemoryStorage) Save(key, value string) (string, bool, error) {
+	if existingKey, ok := s.getKeyByValue(value); ok {
+		return existingKey, false, nil
+	}
+	s.urls[key] = value
+	return key, true, nil
+}
+
+func (s *MemoryStorage) GetByOriginalURL(originalURL string) (string, bool) {
+	for key, value := range s.urls {
+		if value == originalURL {
+			return key, true
+		}
+	}
+	return "", false
+}
+
+func (s *MemoryStorage) getKeyByValue(value string) (string, bool) {
+	for key, val := range s.urls {
+		if val == value {
+			return key, true
+		}
+	}
+	return "", false
+}
+
+func (s *MemoryStorage) BatchSave(items map[string]string) error {
+	for key, value := range items {
+		s.urls[key] = value
+	}
+	return nil
+}
+
+func (s *MemoryStorage) Close() error {
+	return nil
+}
+
+func (s *MemoryStorage) Ping(ctx context.Context) error {
+	return nil
 }
