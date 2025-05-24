@@ -7,13 +7,14 @@ import (
 )
 
 type Storage interface {
-	Get(key string) (string, bool)
+	Get(key string) (string, bool, bool)
 	Save(key, value string, userID string) (string, bool, error)
 	GetByOriginalURL(originalURL string) (string, bool)
 	BatchSave(items map[string]string, userID string) error
 	GetUserURLs(userID string) (map[string]string, error)
 	Close() error
 	Ping(ctx context.Context) error
+	BatchDelete(shortURLs []string, userID string) error
 }
 
 type FileStorage struct {
@@ -45,9 +46,9 @@ func NewStorage(filePath string) (*FileStorage, error) {
 	return storage, nil
 }
 
-func (s *FileStorage) Get(key string) (string, bool) {
+func (s *FileStorage) Get(key string) (string, bool, bool) {
 	val, ok := s.urls[key]
-	return val.OriginalURL, ok
+	return val.OriginalURL, false, ok
 }
 
 func (s *FileStorage) Save(key, value string, userID string) (string, bool, error) {
@@ -141,6 +142,10 @@ func (s *FileStorage) Ping(ctx context.Context) error {
 	return nil
 }
 
+func (s *FileStorage) BatchDelete(shortURLs []string, userID string) error {
+	return nil
+}
+
 type MemoryStorage struct {
 	urls map[string]struct {
 		OriginalURL string
@@ -157,9 +162,9 @@ func NewMemoryStorage() *MemoryStorage {
 	}
 }
 
-func (s *MemoryStorage) Get(key string) (string, bool) {
+func (s *MemoryStorage) Get(key string) (string, bool, bool) {
 	val, ok := s.urls[key]
-	return val.OriginalURL, ok
+	return val.OriginalURL, false, ok
 }
 
 func (s *MemoryStorage) Save(key, value string, userID string) (string, bool, error) {
@@ -222,5 +227,9 @@ func (s *MemoryStorage) Close() error {
 }
 
 func (s *MemoryStorage) Ping(ctx context.Context) error {
+	return nil
+}
+
+func (s *MemoryStorage) BatchDelete(shortURLs []string, userID string) error {
 	return nil
 }

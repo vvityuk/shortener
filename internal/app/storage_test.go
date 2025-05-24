@@ -29,6 +29,72 @@ func TestMemoryStorage(t *testing.T) {
 	testStorage(t, storage)
 }
 
+func TestFileStorage_Get(t *testing.T) {
+	storage, err := NewStorage("test_urls.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer storage.Close()
+
+	// Сохраняем тестовые данные
+	_, _, err = storage.Save("test_key", "test_value", "user1")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Проверяем получение существующего значения
+	value, isDeleted, ok := storage.Get("test_key")
+	if !ok {
+		t.Error("Expected to get value, got false")
+	}
+	if value != "test_value" {
+		t.Errorf("Expected 'test_value', got '%s'", value)
+	}
+	if isDeleted {
+		t.Error("Expected isDeleted to be false")
+	}
+
+	// Проверяем получение несуществующего значения
+	_, isDeleted, ok = storage.Get("non_existent")
+	if ok {
+		t.Error("Expected to get false for non-existent key")
+	}
+	if isDeleted {
+		t.Error("Expected isDeleted to be false for non-existent key")
+	}
+}
+
+func TestMemoryStorage_Get(t *testing.T) {
+	storage := NewMemoryStorage()
+
+	// Сохраняем тестовые данные
+	_, _, err := storage.Save("test_key", "test_value", "user1")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Проверяем получение существующего значения
+	value, isDeleted, ok := storage.Get("test_key")
+	if !ok {
+		t.Error("Expected to get value, got false")
+	}
+	if value != "test_value" {
+		t.Errorf("Expected 'test_value', got '%s'", value)
+	}
+	if isDeleted {
+		t.Error("Expected isDeleted to be false")
+	}
+
+	// Проверяем получение несуществующего значения
+	_, isDeleted, ok = storage.Get("non_existent")
+	if ok {
+		t.Error("Expected to get false for non-existent key")
+	}
+	if isDeleted {
+		t.Error("Expected isDeleted to be false for non-existent key")
+	}
+}
+
 func testStorage(t *testing.T, storage Storage) {
 	t.Run("Save and Get URL", func(t *testing.T) {
 		userID := "test-user"
@@ -45,12 +111,15 @@ func testStorage(t *testing.T, storage Storage) {
 		}
 
 		// Проверяем получение URL
-		url, ok := storage.Get(shortURL)
+		url, isDeleted, ok := storage.Get(shortURL)
 		if !ok {
 			t.Error("Failed to get URL")
 		}
 		if url != originalURL {
 			t.Errorf("Expected URL %s, got %s", originalURL, url)
+		}
+		if isDeleted {
+			t.Error("Expected isDeleted to be false")
 		}
 
 		// Проверяем сохранение того же URL для того же пользователя
@@ -92,12 +161,15 @@ func testStorage(t *testing.T, storage Storage) {
 
 		// Проверяем, что все URL сохранены
 		for key, value := range items {
-			url, ok := storage.Get(key)
+			url, isDeleted, ok := storage.Get(key)
 			if !ok {
 				t.Errorf("Failed to get URL for key %s", key)
 			}
 			if url != value {
 				t.Errorf("Expected URL %s for key %s, got %s", value, key, url)
+			}
+			if isDeleted {
+				t.Errorf("Expected isDeleted to be false for key %s", key)
 			}
 		}
 	})

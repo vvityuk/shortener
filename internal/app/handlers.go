@@ -44,13 +44,17 @@ func NewHandler(service *Service) *Handler {
 
 func (h *Handler) GetURL(w http.ResponseWriter, r *http.Request) {
 	shortCode := chi.URLParam(r, "shortCode")
-	val, ok := h.service.GetURL(shortCode)
-	if ok {
-		w.Header().Set("Location", val)
-		w.WriteHeader(http.StatusTemporaryRedirect)
+	originalURL, isDeleted, ok := h.service.GetURL(shortCode)
+	if !ok {
+		w.WriteHeader(http.StatusBadRequest)
 		return
 	}
-	w.WriteHeader(http.StatusBadRequest)
+	if isDeleted {
+		w.WriteHeader(http.StatusGone)
+		return
+	}
+	w.Header().Set("Location", originalURL)
+	w.WriteHeader(http.StatusTemporaryRedirect)
 }
 
 func (h *Handler) CreateURL(w http.ResponseWriter, r *http.Request) {
@@ -201,4 +205,28 @@ func (h *Handler) GetUserURLs(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(resp)
+}
+
+func (h *Handler) DeleteUserURLs(w http.ResponseWriter, r *http.Request) {
+	defer r.Body.Close()
+
+	userID := middleware.GetUserID(r)
+	if userID == "" {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	var shortURLs []string
+	if err := json.NewDecoder(r.Body).Decode(&shortURLs); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if len(shortURLs) == 0 {
+		http.Error(w, "Empty list of URLs", http.StatusBadRequest)
+		return
+	}
+
+	h.service.BatchDelete(shortURLs, userID)
+	w.WriteHeader(http.StatusAccepted)
 }

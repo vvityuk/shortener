@@ -44,6 +44,7 @@ func main() {
 	r.Get("/ping", handler.PingDB)
 	r.Post("/api/shorten/batch", handler.BatchShortenURL)
 	r.Get("/api/user/urls", handler.GetUserURLs)
+	r.Delete("/api/user/urls", handler.DeleteUserURLs)
 
 	// Запуск сервера
 	err = http.ListenAndServe(cfg.ServerAddress, r)

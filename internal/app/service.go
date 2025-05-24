@@ -39,7 +39,7 @@ func NewService(cfg *config.Config) (*Service, error) {
 	return &Service{storage: storage, config: cfg}, nil
 }
 
-func (s *Service) GetURL(shortCode string) (string, bool) {
+func (s *Service) GetURL(shortCode string) (string, bool, bool) {
 	return s.storage.Get(shortCode)
 }
 
@@ -86,4 +86,10 @@ func (s *Service) BatchCreateURL(items map[string]string, userID string) (map[st
 
 func (s *Service) GetUserURLs(userID string) (map[string]string, error) {
 	return s.storage.GetUserURLs(userID)
+}
+
+func (s *Service) BatchDelete(shortURLs []string, userID string) {
+	go func() {
+		_ = s.storage.BatchDelete(shortURLs, userID)
+	}()
 }

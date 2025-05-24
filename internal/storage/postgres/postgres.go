@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
+	"github.com/lib/pq"
 )
 
 type Storage struct {
@@ -37,6 +38,7 @@ func createTables(db *sql.DB) error {
 			original_url TEXT NOT NULL,
 			user_id VARCHAR(255) NOT NULL,
 			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+			is_deleted BOOLEAN DEFAULT FALSE,
 			UNIQUE(original_url, user_id)
 		);
 	`
@@ -44,16 +46,17 @@ func createTables(db *sql.DB) error {
 	return err
 }
 
-func (s *Storage) Get(key string) (string, bool) {
+func (s *Storage) Get(key string) (string, bool, bool) {
 	var originalURL string
-	err := s.db.QueryRow("SELECT original_url FROM urls WHERE short_url = $1", key).Scan(&originalURL)
+	var isDeleted bool
+	err := s.db.QueryRow("SELECT original_url, is_deleted FROM urls WHERE short_url = $1", key).Scan(&originalURL, &isDeleted)
 	if err == sql.ErrNoRows {
-		return "", false
+		return "", false, false
 	}
 	if err != nil {
-		return "", false
+		return "", false, false
 	}
-	return originalURL, true
+	return originalURL, isDeleted, true
 }
 
 func (s *Storage) Save(key, value string, userID string) (string, bool, error) {
@@ -144,4 +147,41 @@ func (s *Storage) GetUserURLs(userID string) (map[string]string, error) {
 		return nil, err
 	}
 	return urls, nil
+}
+
+func (s *Storage) BatchDelete(shortURLs []string, userID string) error {
+	if len(shortURLs) == 0 {
+		return nil
+	}
+
+	// Используем паттерн fanIn для эффективного обновления
+	const batchSize = 100
+	chunks := make([][]string, 0, (len(shortURLs)+batchSize-1)/batchSize)
+
+	for i := 0; i < len(shortURLs); i += batchSize {
+		end := i + batchSize
+		if end > len(shortURLs) {
+			end = len(shortURLs)
+		}
+		chunks = append(chunks, shortURLs[i:end])
+	}
+
+	errChan := make(chan error, len(chunks))
+
+	for _, chunk := range chunks {
+		go func(urls []string) {
+			query := "UPDATE urls SET is_deleted = TRUE WHERE short_url = ANY($1) AND user_id = $2"
+			_, err := s.db.Exec(query, pq.Array(urls), userID)
+			errChan <- err
+		}(chunk)
+	}
+
+	// Собираем ошибки
+	for i := 0; i < len(chunks); i++ {
+		if err := <-errChan; err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
