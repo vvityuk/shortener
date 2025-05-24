@@ -9,23 +9,23 @@ import (
 )
 
 const (
-	cookieName = "user_id"
-	secretKey  = "23ev43VRE35srv45" // Нужно будет перенести в конфиг
+	ChiookieName = "user_id"
+	secretKey    = "23ev43VRE35srv45" // Нужно будет перенести в конфиг
 )
 
 func AuthMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		cookie, err := r.Cookie(cookieName)
+		cookie, err := r.Cookie(ChiookieName)
 		if err != nil || !isValidCookie(cookie.Value) {
 			userID := generateUserID()
 			http.SetCookie(w, &http.Cookie{
-				Name:     cookieName,
+				Name:     ChiookieName,
 				Value:    userID,
 				Path:     "/",
 				Expires:  time.Now().Add(24 * time.Hour),
 				HttpOnly: true,
 			})
-			r.AddCookie(&http.Cookie{Name: cookieName, Value: userID})
+			r.AddCookie(&http.Cookie{Name: ChiookieName, Value: userID})
 		}
 		next.ServeHTTP(w, r)
 	})
@@ -42,7 +42,7 @@ func isValidCookie(value string) bool {
 }
 
 func GetUserID(r *http.Request) string {
-	cookie, err := r.Cookie(cookieName)
+	cookie, err := r.Cookie(ChiookieName)
 	if err != nil {
 		return ""
 	}

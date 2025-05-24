@@ -10,7 +10,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/go-chi/chi"
+	"github.com/go-chi/chi/v5"
+	"github.com/vvityuk/shortener/internal/app/middleware"
 	"github.com/vvityuk/shortener/internal/config"
 )
 
@@ -41,6 +42,7 @@ func TestHandlers(t *testing.T) {
 	t.Run("Create URL", func(t *testing.T) {
 		originalURL := "https://ya.ru"
 		req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(originalURL))
+		req.AddCookie(&http.Cookie{Name: middleware.ChiookieName, Value: "test-user-id"})
 		w := httptest.NewRecorder()
 		handler.CreateURL(w, req)
 
@@ -55,30 +57,26 @@ func TestHandlers(t *testing.T) {
 		}
 	})
 
-	// Тест несуществующего URL
-	t.Run("Non-existent URL", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodGet, "/not", nil)
+	// Тест создания URL без куки
+	t.Run("Create URL without cookie", func(t *testing.T) {
+		originalURL := "https://ya.ru"
+		req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(originalURL))
 		w := httptest.NewRecorder()
+		handler.CreateURL(w, req)
 
-		// Создаем Chi контекст для теста
-		rctx := chi.NewRouteContext()
-		rctx.URLParams.Add("shortCode", "not")
-		req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
-
-		handler.GetURL(w, req)
-
-		if w.Code != http.StatusBadRequest {
-			t.Errorf("Expected status %d, got %d", http.StatusBadRequest, w.Code)
+		if w.Code != http.StatusUnauthorized {
+			t.Errorf("Expected status %d, got %d", http.StatusUnauthorized, w.Code)
 		}
 	})
 
 	// Тест создания URL через API
-	t.Run("Create_URL_via_API", func(t *testing.T) {
+	t.Run("Create URL via API", func(t *testing.T) {
 		req := shortenRequest{URL: "https://example.com"}
 		body, _ := json.Marshal(req)
 
 		request := httptest.NewRequest(http.MethodPost, "/api/shorten", bytes.NewReader(body))
 		request.Header.Set("Content-Type", "application/json")
+		request.AddCookie(&http.Cookie{Name: middleware.ChiookieName, Value: "test-user-id"})
 		w := httptest.NewRecorder()
 
 		handler.ShortenURL(w, request)
@@ -97,6 +95,109 @@ func TestHandlers(t *testing.T) {
 
 		if response.Result == "" {
 			t.Error("Expected non-empty result")
+		}
+	})
+
+	// Тест получения URL пользователя
+	t.Run("Get User URLs", func(t *testing.T) {
+		// Сначала создаем несколько URL
+		userID := "test-user-id"
+		urls := []string{
+			"https://example1.com",
+			"https://example2.com",
+		}
+
+		for _, url := range urls {
+			req := shortenRequest{URL: url}
+			body, _ := json.Marshal(req)
+
+			request := httptest.NewRequest(http.MethodPost, "/api/shorten", bytes.NewReader(body))
+			request.Header.Set("Content-Type", "application/json")
+			request.AddCookie(&http.Cookie{Name: middleware.ChiookieName, Value: userID})
+			w := httptest.NewRecorder()
+
+			handler.ShortenURL(w, request)
+		}
+
+		// Теперь получаем URL пользователя
+		req := httptest.NewRequest(http.MethodGet, "/api/user/urls", nil)
+		req.AddCookie(&http.Cookie{Name: middleware.ChiookieName, Value: userID})
+		w := httptest.NewRecorder()
+
+		handler.GetUserURLs(w, req)
+
+		if w.Code != http.StatusOK {
+			t.Errorf("Expected status %d, got %d", http.StatusOK, w.Code)
+		}
+
+		var response []userURLResponse
+		if err := json.NewDecoder(w.Body).Decode(&response); err != nil {
+			t.Fatal(err)
+		}
+
+		if len(response) != len(urls) {
+			t.Errorf("Expected %d URLs, got %d", len(urls), len(response))
+		}
+
+		// Проверяем, что все URL присутствуют в ответе
+		urlMap := make(map[string]bool)
+		for _, url := range urls {
+			urlMap[url] = false
+		}
+
+		for _, resp := range response {
+			if !strings.HasPrefix(resp.ShortURL, cfg.BaseURL+"/") {
+				t.Errorf("Expected short URL to start with %s, got %s", cfg.BaseURL+"/", resp.ShortURL)
+			}
+			urlMap[resp.OriginalURL] = true
+		}
+
+		for url, found := range urlMap {
+			if !found {
+				t.Errorf("URL %s not found in response", url)
+			}
+		}
+	})
+
+	// Тест получения URL пользователя без куки
+	t.Run("Get User URLs without cookie", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/api/user/urls", nil)
+		w := httptest.NewRecorder()
+
+		handler.GetUserURLs(w, req)
+
+		if w.Code != http.StatusUnauthorized {
+			t.Errorf("Expected status %d, got %d", http.StatusUnauthorized, w.Code)
+		}
+	})
+
+	// Тест получения пустого списка URL пользователя
+	t.Run("Get Empty User URLs", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/api/user/urls", nil)
+		req.AddCookie(&http.Cookie{Name: middleware.ChiookieName, Value: "empty-user-id"})
+		w := httptest.NewRecorder()
+
+		handler.GetUserURLs(w, req)
+
+		if w.Code != http.StatusNoContent {
+			t.Errorf("Expected status %d, got %d", http.StatusNoContent, w.Code)
+		}
+	})
+
+	// Тест несуществующего URL
+	t.Run("Non-existent URL", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/not", nil)
+		w := httptest.NewRecorder()
+
+		// Создаем Chi контекст для теста
+		rctx := chi.NewRouteContext()
+		rctx.URLParams.Add("shortCode", "not")
+		req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+
+		handler.GetURL(w, req)
+
+		if w.Code != http.StatusBadRequest {
+			t.Errorf("Expected status %d, got %d", http.StatusBadRequest, w.Code)
 		}
 	})
 
