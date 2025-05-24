@@ -39,13 +39,13 @@ func NewService(cfg *config.Config) (*Service, error) {
 	return &Service{storage: storage, config: cfg}, nil
 }
 
-func (s *Service) GetURL(shortCode string) (string, bool) {
+func (s *Service) GetURL(shortCode string) (string, bool, bool) {
 	return s.storage.Get(shortCode)
 }
 
-func (s *Service) CreateURL(longURL string) (string, bool, error) {
+func (s *Service) CreateURL(longURL string, userID string) (string, bool, error) {
 	shortURL := s.randStr(4)
-	return s.storage.Save(shortURL, longURL)
+	return s.storage.Save(shortURL, longURL, userID)
 }
 
 func (s *Service) randStr(n int) string {
@@ -67,7 +67,7 @@ func (s *Service) Ping(ctx context.Context) error {
 	return s.storage.Ping(ctx)
 }
 
-func (s *Service) BatchCreateURL(items map[string]string) (map[string]string, error) {
+func (s *Service) BatchCreateURL(items map[string]string, userID string) (map[string]string, error) {
 	result := make(map[string]string)
 	urls := make(map[string]string)
 
@@ -77,9 +77,19 @@ func (s *Service) BatchCreateURL(items map[string]string) (map[string]string, er
 		result[correlationID] = shortURL
 	}
 
-	if err := s.storage.BatchSave(urls); err != nil {
+	if err := s.storage.BatchSave(urls, userID); err != nil {
 		return nil, err
 	}
 
 	return result, nil
+}
+
+func (s *Service) GetUserURLs(userID string) (map[string]string, error) {
+	return s.storage.GetUserURLs(userID)
+}
+
+func (s *Service) BatchDelete(shortURLs []string, userID string) {
+	go func() {
+		_ = s.storage.BatchDelete(shortURLs, userID)
+	}()
 }
