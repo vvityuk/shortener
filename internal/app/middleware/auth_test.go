@@ -21,7 +21,7 @@ func TestAuthMiddleware(t *testing.T) {
 		},
 		{
 			name:           "Valid cookie",
-			cookie:         &http.Cookie{Name: CookieName, Value: "test-user-id"},
+			cookie:         &http.Cookie{Name: ChiookieName, Value: "test-user-id"},
 			expectedStatus: http.StatusOK,
 			checkCookie:    false,
 		},
@@ -52,8 +52,8 @@ func TestAuthMiddleware(t *testing.T) {
 				if len(cookies) != 1 {
 					t.Errorf("Expected 1 cookie, got %d", len(cookies))
 				}
-				if cookies[0].Name != CookieName {
-					t.Errorf("Expected cookie name %s, got %s", CookieName, cookies[0].Name)
+				if cookies[0].Name != ChiookieName {
+					t.Errorf("Expected cookie name %s, got %s", ChiookieName, cookies[0].Name)
 				}
 				if cookies[0].Value == "" {
 					t.Error("Expected non-empty cookie value")
@@ -76,7 +76,7 @@ func TestGetUserID(t *testing.T) {
 		},
 		{
 			name:     "Valid cookie",
-			cookie:   &http.Cookie{Name: CookieName, Value: "test-user-id"},
+			cookie:   &http.Cookie{Name: ChiookieName, Value: "test-user-id"},
 			expected: "test-user-id",
 		},
 	}
