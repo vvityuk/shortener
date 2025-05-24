@@ -100,6 +100,9 @@ func TestHandlers(t *testing.T) {
 
 	// Тест получения URL пользователя
 	t.Run("Get User URLs", func(t *testing.T) {
+		// Очищаем хранилище перед тестом
+		service.storage = NewMemoryStorage()
+
 		// Сначала создаем несколько URL
 		userID := "test-user-id"
 		urls := []string{
@@ -215,6 +218,9 @@ func TestHandlers(t *testing.T) {
 
 	// Тест пакетного создания URL
 	t.Run("Batch Shorten URL", func(t *testing.T) {
+		// Очищаем хранилище перед тестом
+		service.storage = NewMemoryStorage()
+
 		batchReq := []batchRequest{
 			{CorrelationID: "1", OriginalURL: "https://example1.com"},
 			{CorrelationID: "2", OriginalURL: "https://example2.com"},
@@ -223,6 +229,7 @@ func TestHandlers(t *testing.T) {
 
 		req := httptest.NewRequest(http.MethodPost, "/api/shorten/batch", bytes.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
+		req.AddCookie(&http.Cookie{Name: middleware.ChiookieName, Value: "test-user-id"})
 		w := httptest.NewRecorder()
 
 		handler.BatchShortenURL(w, req)
@@ -249,8 +256,12 @@ func TestHandlers(t *testing.T) {
 
 	// Тест пакетного создания URL с пустым запросом
 	t.Run("Batch Shorten URL Empty Request", func(t *testing.T) {
+		// Очищаем хранилище перед тестом
+		service.storage = NewMemoryStorage()
+
 		req := httptest.NewRequest(http.MethodPost, "/api/shorten/batch", bytes.NewReader([]byte("[]")))
 		req.Header.Set("Content-Type", "application/json")
+		req.AddCookie(&http.Cookie{Name: middleware.ChiookieName, Value: "test-user-id"})
 		w := httptest.NewRecorder()
 
 		handler.BatchShortenURL(w, req)
@@ -262,8 +273,12 @@ func TestHandlers(t *testing.T) {
 
 	// Тест пакетного создания URL с некорректным JSON
 	t.Run("Batch Shorten URL Invalid JSON", func(t *testing.T) {
+		// Очищаем хранилище перед тестом
+		service.storage = NewMemoryStorage()
+
 		req := httptest.NewRequest(http.MethodPost, "/api/shorten/batch", bytes.NewReader([]byte("invalid json")))
 		req.Header.Set("Content-Type", "application/json")
+		req.AddCookie(&http.Cookie{Name: middleware.ChiookieName, Value: "test-user-id"})
 		w := httptest.NewRecorder()
 
 		handler.BatchShortenURL(w, req)
