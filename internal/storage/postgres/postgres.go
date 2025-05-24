@@ -35,8 +35,9 @@ func createTables(db *sql.DB) error {
 			id SERIAL PRIMARY KEY,
 			short_url VARCHAR(255) UNIQUE NOT NULL,
 			original_url TEXT NOT NULL,
+			user_id VARCHAR(255) NOT NULL,
 			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-			UNIQUE(original_url)
+			UNIQUE(original_url, user_id)
 		);
 	`
 	_, err := db.Exec(query)
@@ -55,14 +56,14 @@ func (s *Storage) Get(key string) (string, bool) {
 	return originalURL, true
 }
 
-func (s *Storage) Save(key, value string) (string, bool, error) {
+func (s *Storage) Save(key, value string, userID string) (string, bool, error) {
 	var shortURL string
 	var isNew bool
 	query := `
 		WITH upsert AS (
-			INSERT INTO urls (short_url, original_url)
-			VALUES ($1, $2)
-			ON CONFLICT (original_url) DO NOTHING
+			INSERT INTO urls (short_url, original_url, user_id)
+			VALUES ($1, $2, $3)
+			ON CONFLICT (original_url, user_id) DO NOTHING
 			RETURNING short_url, true as is_new
 		)
 		SELECT short_url, COALESCE(is_new, false) as is_new 
@@ -70,31 +71,31 @@ func (s *Storage) Save(key, value string) (string, bool, error) {
 		UNION ALL
 		SELECT short_url, false as is_new 
 		FROM urls 
-		WHERE original_url = $2
+		WHERE original_url = $2 AND user_id = $3
 		LIMIT 1
 	`
-	err := s.db.QueryRow(query, key, value).Scan(&shortURL, &isNew)
+	err := s.db.QueryRow(query, key, value, userID).Scan(&shortURL, &isNew)
 	if err != nil {
 		return "", false, err
 	}
 	return shortURL, isNew, nil
 }
 
-func (s *Storage) BatchSave(items map[string]string) error {
+func (s *Storage) BatchSave(items map[string]string, userID string) error {
 	tx, err := s.db.Begin()
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
 
-	stmt, err := tx.Prepare("INSERT INTO urls (short_url, original_url) VALUES ($1, $2)")
+	stmt, err := tx.Prepare("INSERT INTO urls (short_url, original_url, user_id) VALUES ($1, $2, $3)")
 	if err != nil {
 		return err
 	}
 	defer stmt.Close()
 
 	for key, value := range items {
-		_, err = stmt.Exec(key, value)
+		_, err = stmt.Exec(key, value, userID)
 		if err != nil {
 			return err
 		}
@@ -121,4 +122,23 @@ func (s *Storage) GetByOriginalURL(originalURL string) (string, bool) {
 		return "", false
 	}
 	return shortURL, true
+}
+
+func (s *Storage) GetUserURLs(userID string) (map[string]string, error) {
+	query := `SELECT short_url, original_url FROM urls WHERE user_id = $1`
+	rows, err := s.db.Query(query, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	urls := make(map[string]string)
+	for rows.Next() {
+		var shortURL, originalURL string
+		if err := rows.Scan(&shortURL, &originalURL); err != nil {
+			return nil, err
+		}
+		urls[shortURL] = originalURL
+	}
+	return urls, nil
 }
