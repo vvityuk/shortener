@@ -10,6 +10,8 @@ require (
 	golang.org/x/exp v0.0.0-20241217172543-b2144cdd0a67
 )
 
+require github.com/lib/pq v1.10.9 // indirect
+
 require (
 	github.com/jackc/pgerrcode v0.0.0-20240316143900-6e2875d9b438
 	github.com/jackc/pgpassfile v1.0.0 // indirect
