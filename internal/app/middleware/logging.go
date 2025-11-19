@@ -7,17 +7,35 @@ import (
 	"go.uber.org/zap"
 )
 
+// loggingResponseWriter оборачивает http.ResponseWriter для отслеживания статуса ответа и размера данных.
+// Используется в LoggingMiddleware для сбора метрик о HTTP-ответах (статус код и размер ответа).
 type loggingResponseWriter struct {
+	// ResponseWriter оригинальный HTTP ResponseWriter для делегирования операций записи
 	http.ResponseWriter
+	// statusCode HTTP-статус код ответа
 	statusCode int
-	size       int
+	// size размер записанных данных в байтах
+	size int
 }
 
+// WriteHeader устанавливает HTTP-статус код ответа и сохраняет его для логирования.
+//
+// Параметры:
+//   - code: HTTP-статус код (например, 200, 404, 500)
 func (lrw *loggingResponseWriter) WriteHeader(code int) {
 	lrw.statusCode = code
 	lrw.ResponseWriter.WriteHeader(code)
 }
 
+// Write записывает данные в обёрнутый ResponseWriter и отслеживает размер записанных данных.
+// Накопленный размер используется для логирования метрик запроса.
+//
+// Параметры:
+//   - b: данные для записи
+//
+// Возвращает:
+//   - int: количество записанных байт
+//   - error: ошибка при записи данных
 func (lrw *loggingResponseWriter) Write(b []byte) (int, error) {
 	size, err := lrw.ResponseWriter.Write(b)
 	lrw.size += size
