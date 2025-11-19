@@ -184,4 +184,3 @@ func BenchmarkService_CreateURL_FileStorage(b *testing.B) {
 		_, _, _ = service.CreateURL("https://example.com", "user1")
 	}
 }
-

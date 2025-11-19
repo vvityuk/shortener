@@ -191,4 +191,3 @@ func BenchmarkFileStorage_Ping(b *testing.B) {
 		_ = storage.Ping(ctx)
 	}
 }
-

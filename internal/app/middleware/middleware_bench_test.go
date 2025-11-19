@@ -31,4 +31,3 @@ func BenchmarkIsValidCookie(b *testing.B) {
 		}
 	})
 }
-
