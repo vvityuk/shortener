@@ -6,6 +6,8 @@ import (
 	"os"
 )
 
+// Storage определяет интерфейс для работы с хранилищем коротких URL.
+// Реализации могут использовать память, файлы или базу данных.
 type Storage interface {
 	Get(key string) (string, bool, bool)
 	Save(key, value string, userID string) (string, bool, error)
@@ -17,6 +19,8 @@ type Storage interface {
 	BatchDelete(shortURLs []string, userID string) error
 }
 
+// FileStorage реализует хранилище на основе JSON-файла.
+// Данные сохраняются в файл и загружаются при инициализации.
 type FileStorage struct {
 	urls map[string]struct {
 		OriginalURL string
@@ -25,6 +29,14 @@ type FileStorage struct {
 	file *os.File
 }
 
+// NewStorage создает новое файловое хранилище.
+//
+// Параметры:
+//   - filePath: путь к JSON-файлу для хранения данных
+//
+// Возвращает:
+//   - *FileStorage: новый экземпляр файлового хранилища
+//   - error: ошибка при создании или открытии файла
 func NewStorage(filePath string) (*FileStorage, error) {
 	file, err := os.OpenFile(filePath, os.O_RDWR|os.O_CREATE, 0644)
 	if err != nil {
@@ -146,6 +158,8 @@ func (s *FileStorage) BatchDelete(shortURLs []string, userID string) error {
 	return nil
 }
 
+// MemoryStorage реализует хранилище в оперативной памяти.
+// Данные не сохраняются между перезапусками приложения.
 type MemoryStorage struct {
 	urls map[string]struct {
 		OriginalURL string
@@ -153,6 +167,10 @@ type MemoryStorage struct {
 	}
 }
 
+// NewMemoryStorage создает новое хранилище в памяти.
+//
+// Возвращает:
+//   - *MemoryStorage: новый экземпляр хранилища в памяти
 func NewMemoryStorage() *MemoryStorage {
 	return &MemoryStorage{
 		urls: make(map[string]struct {

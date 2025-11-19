@@ -8,6 +8,7 @@ import (
 	"time"
 )
 
+// Кнстанты системы.
 const (
 	// ChiookieName имя cookie для хранения идентификатора пользователя
 	ChiookieName = "user_id"
