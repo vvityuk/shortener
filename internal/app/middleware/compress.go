@@ -7,6 +7,15 @@ import (
 	"strings"
 )
 
+// Write записывает данные в обёрнутый Writer (gzip.Writer), что обеспечивает сжатие данных.
+// Реализует интерфейс http.ResponseWriter для поддержки сжатия HTTP-ответов.
+//
+// Параметры:
+//   - b: данные для записи
+//
+// Возвращает:
+//   - int: количество записанных байт
+//   - error: ошибка при записи данных
 type gzipWriter struct {
 	http.ResponseWriter
 	Writer io.Writer

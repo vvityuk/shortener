@@ -56,6 +56,15 @@ func createTables(db *sql.DB) error {
 	return err
 }
 
+// Get получает оригинальный URL по короткому коду из базы данных.
+//
+// Параметры:
+//   - key: короткий код URL
+//
+// Возвращает:
+//   - string: оригинальный URL
+//   - bool: флаг удаления (true если URL был удален)
+//   - bool: флаг успешного получения (true если URL найден)
 func (s *Storage) Get(key string) (string, bool, bool) {
 	var originalURL string
 	var isDeleted bool
@@ -69,6 +78,19 @@ func (s *Storage) Get(key string) (string, bool, bool) {
 	return originalURL, isDeleted, true
 }
 
+// Save сохраняет короткий URL для указанного оригинального URL в базе данных.
+// Использует UPSERT для предотвращения дублирования: если URL уже существует для данного пользователя,
+// возвращает существующий короткий код без создания новой записи.
+//
+// Параметры:
+//   - key: короткий код URL
+//   - value: оригинальный URL
+//   - userID: идентификатор пользователя
+//
+// Возвращает:
+//   - string: короткий код URL
+//   - bool: флаг создания нового URL (true если создан новый, false если уже существовал)
+//   - error: ошибка при сохранении в базу данных
 func (s *Storage) Save(key, value string, userID string) (string, bool, error) {
 	var shortURL string
 	var isNew bool
@@ -94,6 +116,16 @@ func (s *Storage) Save(key, value string, userID string) (string, bool, error) {
 	return shortURL, isNew, nil
 }
 
+// BatchSave сохраняет несколько коротких URL за один запрос в рамках транзакции.
+// Использует подготовленные запросы для повышения производительности.
+// При ошибке выполнения транзакция откатывается.
+//
+// Параметры:
+//   - items: карта соответствий short_code -> original_url
+//   - userID: идентификатор пользователя
+//
+// Возвращает:
+//   - error: ошибка при сохранении в базу данных или откате транзакции
 func (s *Storage) BatchSave(items map[string]string, userID string) error {
 	tx, err := s.db.Begin()
 	if err != nil {
@@ -117,14 +149,34 @@ func (s *Storage) BatchSave(items map[string]string, userID string) error {
 	return tx.Commit()
 }
 
+// Close закрывает соединение с базой данных PostgreSQL и освобождает ресурсы.
+//
+// Возвращает:
+//   - error: ошибка при закрытии соединения с базой данных
 func (s *Storage) Close() error {
 	return s.db.Close()
 }
 
+// Ping проверяет доступность базы данных PostgreSQL.
+// Используется для health-check эндпоинтов.
+//
+// Параметры:
+//   - ctx: контекст для выполнения операции проверки соединения
+//
+// Возвращает:
+//   - error: ошибка при проверке доступности базы данных
 func (s *Storage) Ping(ctx context.Context) error {
 	return s.db.PingContext(ctx)
 }
 
+// GetByOriginalURL находит короткий код по оригинальному URL в базе данных.
+//
+// Параметры:
+//   - originalURL: оригинальный URL для поиска
+//
+// Возвращает:
+//   - string: короткий код URL
+//   - bool: флаг успешного поиска (true если URL найден)
 func (s *Storage) GetByOriginalURL(originalURL string) (string, bool) {
 	var shortURL string
 	err := s.db.QueryRow("SELECT short_url FROM urls WHERE original_url = $1", originalURL).Scan(&shortURL)
@@ -137,6 +189,15 @@ func (s *Storage) GetByOriginalURL(originalURL string) (string, bool) {
 	return shortURL, true
 }
 
+// GetUserURLs возвращает все короткие URL, созданные указанным пользователем.
+// Выполняет SQL-запрос для получения всех записей пользователя из базы данных.
+//
+// Параметры:
+//   - userID: идентификатор пользователя
+//
+// Возвращает:
+//   - map[string]string: карта соответствий short_code -> original_url
+//   - error: ошибка при выполнении запроса к базе данных
 func (s *Storage) GetUserURLs(userID string) (map[string]string, error) {
 	query := `SELECT short_url, original_url FROM urls WHERE user_id = $1`
 	rows, err := s.db.Query(query, userID)
@@ -159,6 +220,16 @@ func (s *Storage) GetUserURLs(userID string) (map[string]string, error) {
 	return urls, nil
 }
 
+// BatchDelete помечает указанные короткие URL как удаленные в базе данных.
+// Использует паттерн fanIn для параллельной обработки больших объемов данных:
+// разбивает массив URL на чанки по 100 элементов и обрабатывает их параллельно в горутинах.
+//
+// Параметры:
+//   - shortURLs: массив коротких кодов для удаления
+//   - userID: идентификатор пользователя (удаляются только URL этого пользователя)
+//
+// Возвращает:
+//   - error: ошибка при выполнении операции удаления
 func (s *Storage) BatchDelete(shortURLs []string, userID string) error {
 	if len(shortURLs) == 0 {
 		return nil
