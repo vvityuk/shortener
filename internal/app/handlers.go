@@ -9,6 +9,8 @@ import (
 	"github.com/vvityuk/shortener/internal/app/middleware"
 )
 
+// Handler обрабатывает HTTP-запросы для сервиса сокращения URL.
+// Предоставляет методы для создания, получения и управления короткими URL.
 type Handler struct {
 	service *Service
 }
@@ -36,12 +38,28 @@ type userURLResponse struct {
 	OriginalURL string `json:"original_url"`
 }
 
+// NewHandler создает новый экземпляр Handler с указанным сервисом.
+//
+// Параметры:
+//   - service: сервис для работы с URL
+//
+// Возвращает:
+//   - *Handler: новый обработчик HTTP-запросов
 func NewHandler(service *Service) *Handler {
 	return &Handler{
 		service: service,
 	}
 }
 
+// GetURL обрабатывает GET-запрос для получения оригинального URL по короткому коду.
+// Выполняет редирект на оригинальный URL или возвращает соответствующий HTTP-статус.
+//
+// Эндпоинт: GET /{shortCode}
+//
+// Возможные статусы ответа:
+//   - 307 (TemporaryRedirect) - успешный редирект
+//   - 410 (Gone) - URL был удален
+//   - 400 (BadRequest) - URL не найден
 func (h *Handler) GetURL(w http.ResponseWriter, r *http.Request) {
 	shortCode := chi.URLParam(r, "shortCode")
 	originalURL, isDeleted, ok := h.service.GetURL(shortCode)
@@ -57,6 +75,16 @@ func (h *Handler) GetURL(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusTemporaryRedirect)
 }
 
+// CreateURL обрабатывает POST-запрос для создания короткого URL из оригинального.
+// Принимает URL в теле запроса и возвращает короткий URL.
+//
+// Эндпоинт: POST /
+//
+// Возможные статусы ответа:
+//   - 201 (Created) - URL успешно создан
+//   - 409 (Conflict) - URL уже существует для данного пользователя
+//   - 401 (Unauthorized) - пользователь не авторизован
+//   - 500 (InternalServerError) - ошибка при создании URL
 func (h *Handler) CreateURL(w http.ResponseWriter, r *http.Request) {
 	defer r.Body.Close()
 
@@ -81,6 +109,25 @@ func (h *Handler) CreateURL(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte(h.service.config.BaseURL + "/" + shortURL))
 }
 
+// ShortenURL обрабатывает POST-запрос для создания короткого URL через JSON API.
+// Принимает JSON с полем "url" и возвращает JSON с полем "result".
+//
+// Эндпоинт: POST /api/shorten
+//
+// Формат запроса:
+//
+//	{"url": "https://example.com"}
+//
+// Формат ответа:
+//
+//	{"result": "http://localhost:8080/abc123"}
+//
+// Возможные статусы ответа:
+//   - 201 (Created) - URL успешно создан
+//   - 409 (Conflict) - URL уже существует для данного пользователя
+//   - 400 (BadRequest) - неверный формат запроса или отсутствует URL
+//   - 401 (Unauthorized) - пользователь не авторизован
+//   - 500 (InternalServerError) - ошибка при создании URL
 func (h *Handler) ShortenURL(w http.ResponseWriter, r *http.Request) {
 	defer r.Body.Close()
 
@@ -120,6 +167,14 @@ func (h *Handler) ShortenURL(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(resp)
 }
 
+// PingDB проверяет доступность базы данных.
+// Используется для health-check эндпоинта.
+//
+// Эндпоинт: GET /ping
+//
+// Возможные статусы ответа:
+//   - 200 (OK) - база данных доступна
+//   - 500 (InternalServerError) - ошибка подключения к базе данных
 func (h *Handler) PingDB(w http.ResponseWriter, r *http.Request) {
 	if err := h.service.Ping(r.Context()); err != nil {
 		http.Error(w, "Database connection error", http.StatusInternalServerError)
@@ -128,6 +183,30 @@ func (h *Handler) PingDB(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
+// BatchShortenURL обрабатывает POST-запрос для пакетного создания коротких URL.
+// Принимает массив объектов с полями "correlation_id" и "original_url".
+//
+// Эндпоинт: POST /api/shorten/batch
+//
+// Формат запроса:
+//
+//	[
+//	  {"correlation_id": "1", "original_url": "https://example.com"},
+//	  {"correlation_id": "2", "original_url": "https://example.org"}
+//	]
+//
+// Формат ответа:
+//
+//	[
+//	  {"correlation_id": "1", "short_url": "http://localhost:8080/abc123"},
+//	  {"correlation_id": "2", "short_url": "http://localhost:8080/def456"}
+//	]
+//
+// Возможные статусы ответа:
+//   - 201 (Created) - URL успешно созданы
+//   - 400 (BadRequest) - неверный формат запроса или пустой массив
+//   - 401 (Unauthorized) - пользователь не авторизован
+//   - 500 (InternalServerError) - ошибка при создании URL
 func (h *Handler) BatchShortenURL(w http.ResponseWriter, r *http.Request) {
 	defer r.Body.Close()
 
@@ -176,6 +255,22 @@ func (h *Handler) BatchShortenURL(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(resp)
 }
 
+// GetUserURLs возвращает список всех коротких URL, созданных текущим пользователем.
+//
+// Эндпоинт: GET /api/user/urls
+//
+// Формат ответа:
+//
+//	[
+//	  {"short_url": "http://localhost:8080/abc123", "original_url": "https://example.com"},
+//	  {"short_url": "http://localhost:8080/def456", "original_url": "https://example.org"}
+//	]
+//
+// Возможные статусы ответа:
+//   - 200 (OK) - список URL успешно получен
+//   - 204 (NoContent) - у пользователя нет созданных URL
+//   - 401 (Unauthorized) - пользователь не авторизован
+//   - 500 (InternalServerError) - ошибка при получении URL
 func (h *Handler) GetUserURLs(w http.ResponseWriter, r *http.Request) {
 	userID := middleware.GetUserID(r)
 	if userID == "" {
@@ -207,6 +302,19 @@ func (h *Handler) GetUserURLs(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(resp)
 }
 
+// DeleteUserURLs обрабатывает DELETE-запрос для пакетного удаления URL пользователя.
+// Принимает массив коротких URL для удаления. Удаление выполняется асинхронно.
+//
+// Эндпоинт: DELETE /api/user/urls
+//
+// Формат запроса:
+//
+//	["abc123", "def456"]
+//
+// Возможные статусы ответа:
+//   - 202 (Accepted) - запрос на удаление принят
+//   - 400 (BadRequest) - неверный формат запроса или пустой массив
+//   - 401 (Unauthorized) - пользователь не авторизован
 func (h *Handler) DeleteUserURLs(w http.ResponseWriter, r *http.Request) {
 	defer r.Body.Close()
 
