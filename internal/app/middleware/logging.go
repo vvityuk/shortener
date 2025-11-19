@@ -24,6 +24,14 @@ func (lrw *loggingResponseWriter) Write(b []byte) (int, error) {
 	return size, err
 }
 
+// LoggingMiddleware создает middleware для логирования HTTP-запросов.
+// Логирует URI, метод, статус ответа, размер ответа и время выполнения запроса.
+//
+// Параметры:
+//   - logger: логгер для записи информации о запросах
+//
+// Возвращает:
+//   - func(http.Handler) http.Handler: функция middleware
 func LoggingMiddleware(logger *zap.Logger) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

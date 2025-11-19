@@ -206,8 +206,11 @@ func ExampleHandler_DeleteUserURLs() {
 	w := httptest.NewRecorder()
 	handler.ShortenURL(w, req)
 
+	resp := w.Result()
+	defer resp.Body.Close()
+
 	var createResp map[string]string
-	json.NewDecoder(w.Result().Body).Decode(&createResp)
+	json.NewDecoder(resp.Body).Decode(&createResp)
 	shortCode := strings.TrimPrefix(createResp["result"], cfg.BaseURL+"/")
 
 	// Удаляем URL

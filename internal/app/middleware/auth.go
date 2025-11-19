@@ -9,10 +9,14 @@ import (
 )
 
 const (
+	// ChiookieName имя cookie для хранения идентификатора пользователя
 	ChiookieName = "user_id"
 	secretKey    = "23ev43VRE35srv45" // Нужно будет перенести в конфиг
 )
 
+// AuthMiddleware обеспечивает аутентификацию пользователей через cookie.
+// Если у пользователя нет валидной cookie, создается новая и устанавливается в ответ.
+// Идентификатор пользователя доступен через GetUserID.
 func AuthMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		cookie, err := r.Cookie(ChiookieName)
@@ -41,6 +45,13 @@ func isValidCookie(value string) bool {
 	return len(value) > 0
 }
 
+// GetUserID извлекает идентификатор пользователя из cookie запроса.
+//
+// Параметры:
+//   - r: HTTP-запрос
+//
+// Возвращает:
+//   - string: идентификатор пользователя или пустую строку, если cookie отсутствует
 func GetUserID(r *http.Request) string {
 	cookie, err := r.Cookie(ChiookieName)
 	if err != nil {

@@ -9,10 +9,20 @@ import (
 	"github.com/lib/pq"
 )
 
+// Storage реализует хранилище на основе PostgreSQL.
+// Обеспечивает персистентное хранение данных с поддержкой транзакций.
 type Storage struct {
 	db *sql.DB
 }
 
+// New создает новое PostgreSQL хранилище и инициализирует необходимые таблицы.
+//
+// Параметры:
+//   - dsn: строка подключения к PostgreSQL (например, "postgres://user:pass@localhost/dbname")
+//
+// Возвращает:
+//   - *Storage: новый экземпляр PostgreSQL хранилища
+//   - error: ошибка при подключении к базе данных или создании таблиц
 func New(dsn string) (*Storage, error) {
 	db, err := sql.Open("pgx", dsn)
 	if err != nil {

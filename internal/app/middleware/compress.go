@@ -16,6 +16,9 @@ func (w gzipWriter) Write(b []byte) (int, error) {
 	return w.Writer.Write(b)
 }
 
+// CompressResponse сжимает HTTP-ответы с использованием gzip.
+// Сжатие применяется только если клиент поддерживает gzip (заголовок Accept-Encoding)
+// и для JSON или HTML контента.
 func CompressResponse(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Проверяем, что клиент поддерживает gzip
@@ -44,6 +47,8 @@ func CompressResponse(next http.Handler) http.Handler {
 	})
 }
 
+// DecompressRequest распаковывает сжатые gzip HTTP-запросы.
+// Если запрос содержит заголовок Content-Encoding: gzip, тело запроса автоматически распаковывается.
 func DecompressRequest(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Проверяем, что запрос сжат
