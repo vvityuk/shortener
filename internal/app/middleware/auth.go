@@ -47,12 +47,7 @@ func isValidCookie(value string) bool {
 }
 
 // GetUserID извлекает идентификатор пользователя из cookie запроса.
-//
-// Параметры:
-//   - r: HTTP-запрос
-//
-// Возвращает:
-//   - string: идентификатор пользователя или пустую строку, если cookie отсутствует
+// Возвращает идентификатор пользователя или пустую строку, если cookie отсутствует.
 func GetUserID(r *http.Request) string {
 	cookie, err := r.Cookie(ChiookieName)
 	if err != nil {

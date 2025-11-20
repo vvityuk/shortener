@@ -22,12 +22,7 @@ type Service struct {
 //  2. Файловое хранилище (если указан FileStoragePath)
 //  3. Хранилище в памяти (по умолчанию)
 //
-// Параметры:
-//   - cfg: конфигурация приложения
-//
-// Возвращает:
-//   - *Service: новый экземпляр сервиса
-//   - error: ошибка при инициализации хранилища
+// Возвращает новый экземпляр сервиса или ошибку при инициализации хранилища.
 func NewService(cfg *config.Config) (*Service, error) {
 	var storage Storage
 	var err error
@@ -54,29 +49,16 @@ func NewService(cfg *config.Config) (*Service, error) {
 }
 
 // GetURL получает оригинальный URL по короткому коду.
-//
-// Параметры:
-//   - shortCode: короткий код URL
-//
-// Возвращает:
-//   - string: оригинальный URL
-//   - bool: флаг удаления (true если URL был удален)
-//   - bool: флаг успешного получения (true если URL найден)
+// Возвращает оригинальный URL, флаг удаления (true если URL был удален)
+// и флаг успешного получения (true если URL найден).
 func (s *Service) GetURL(shortCode string) (string, bool, bool) {
 	return s.storage.Get(shortCode)
 }
 
 // CreateURL создает короткий URL для указанного оригинального URL.
 // Если URL уже существует для данного пользователя, возвращает существующий короткий код.
-//
-// Параметры:
-//   - longURL: оригинальный URL для сокращения
-//   - userID: идентификатор пользователя
-//
-// Возвращает:
-//   - string: короткий код URL
-//   - bool: флаг создания нового URL (true если создан новый, false если уже существовал)
-//   - error: ошибка при создании URL
+// Возвращает короткий код URL, флаг создания нового URL (true если создан новый,
+// false если уже существовал) и ошибку при создании URL.
 func (s *Service) CreateURL(longURL string, userID string) (string, bool, error) {
 	shortURL := s.randStr(4)
 	return s.storage.Save(shortURL, longURL, userID)
@@ -94,33 +76,20 @@ func (s *Service) randStr(n int) string {
 }
 
 // Close закрывает соединение с хранилищем и освобождает ресурсы.
-//
-// Возвращает:
-//   - error: ошибка при закрытии хранилища
+// Возвращает ошибку при закрытии хранилища.
 func (s *Service) Close() error {
 	return s.storage.Close()
 }
 
 // Ping проверяет доступность хранилища данных.
-//
-// Параметры:
-//   - ctx: контекст для выполнения операции
-//
-// Возвращает:
-//   - error: ошибка при проверке доступности хранилища
+// Возвращает ошибку при проверке доступности хранилища.
 func (s *Service) Ping(ctx context.Context) error {
 	return s.storage.Ping(ctx)
 }
 
 // BatchCreateURL создает несколько коротких URL за один запрос.
-//
-// Параметры:
-//   - items: карта соответствий correlation_id -> original_url
-//   - userID: идентификатор пользователя
-//
-// Возвращает:
-//   - map[string]string: карта соответствий correlation_id -> short_code
-//   - error: ошибка при создании URL
+// Принимает карту соответствий correlation_id -> original_url и идентификатор пользователя.
+// Возвращает карту соответствий correlation_id -> short_code и ошибку при создании URL.
 func (s *Service) BatchCreateURL(items map[string]string, userID string) (map[string]string, error) {
 	result := make(map[string]string)
 	urls := make(map[string]string)
@@ -139,23 +108,13 @@ func (s *Service) BatchCreateURL(items map[string]string, userID string) (map[st
 }
 
 // GetUserURLs возвращает все короткие URL, созданные указанным пользователем.
-//
-// Параметры:
-//   - userID: идентификатор пользователя
-//
-// Возвращает:
-//   - map[string]string: карта соответствий short_code -> original_url
-//   - error: ошибка при получении URL
+// Возвращает карту соответствий short_code -> original_url и ошибку при получении URL.
 func (s *Service) GetUserURLs(userID string) (map[string]string, error) {
 	return s.storage.GetUserURLs(userID)
 }
 
 // BatchDelete удаляет указанные короткие URL пользователя.
 // Удаление выполняется асинхронно в отдельной горутине.
-//
-// Параметры:
-//   - shortURLs: массив коротких кодов для удаления
-//   - userID: идентификатор пользователя
 func (s *Service) BatchDelete(shortURLs []string, userID string) {
 	go func() {
 		_ = s.storage.BatchDelete(shortURLs, userID)

@@ -19,9 +19,6 @@ type loggingResponseWriter struct {
 }
 
 // WriteHeader устанавливает HTTP-статус код ответа и сохраняет его для логирования.
-//
-// Параметры:
-//   - code: HTTP-статус код (например, 200, 404, 500)
 func (lrw *loggingResponseWriter) WriteHeader(code int) {
 	lrw.statusCode = code
 	lrw.ResponseWriter.WriteHeader(code)
@@ -29,13 +26,7 @@ func (lrw *loggingResponseWriter) WriteHeader(code int) {
 
 // Write записывает данные в обёрнутый ResponseWriter и отслеживает размер записанных данных.
 // Накопленный размер используется для логирования метрик запроса.
-//
-// Параметры:
-//   - b: данные для записи
-//
-// Возвращает:
-//   - int: количество записанных байт
-//   - error: ошибка при записи данных
+// Возвращает количество записанных байт и ошибку при записи данных.
 func (lrw *loggingResponseWriter) Write(b []byte) (int, error) {
 	size, err := lrw.ResponseWriter.Write(b)
 	lrw.size += size
@@ -44,12 +35,7 @@ func (lrw *loggingResponseWriter) Write(b []byte) (int, error) {
 
 // LoggingMiddleware создает middleware для логирования HTTP-запросов.
 // Логирует URI, метод, статус ответа, размер ответа и время выполнения запроса.
-//
-// Параметры:
-//   - logger: логгер для записи информации о запросах
-//
-// Возвращает:
-//   - func(http.Handler) http.Handler: функция middleware
+// Принимает логгер для записи информации о запросах и возвращает функцию middleware.
 func LoggingMiddleware(logger *zap.Logger) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

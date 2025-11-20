@@ -15,21 +15,29 @@ import (
 	"github.com/vvityuk/shortener/internal/config"
 )
 
-func ExampleHandler_CreateURL() {
-	// Создаем временный файл для хранилища
+// setupTestHandler создает тестовое окружение: временный файл, конфигурацию, сервис и handler.
+// Возвращает handler для обработки запросов, конфигурацию и функцию очистки для освобождения ресурсов.
+func setupTestHandler() (*app.Handler, *config.Config, func()) {
 	tmpFile, _ := os.CreateTemp("", "example-*.json")
-	defer os.Remove(tmpFile.Name())
-	defer tmpFile.Close()
-
-	// Инициализируем конфигурацию и сервис
 	cfg := &config.Config{
 		FileStoragePath: tmpFile.Name(),
 		BaseURL:         "http://localhost:8080",
 	}
 	service, _ := app.NewService(cfg)
-	defer service.Close()
-
 	handler := app.NewHandler(service)
+
+	cleanup := func() {
+		service.Close()
+		tmpFile.Close()
+		os.Remove(tmpFile.Name())
+	}
+
+	return handler, cfg, cleanup
+}
+
+func ExampleHandler_CreateURL() {
+	handler, _, cleanup := setupTestHandler()
+	defer cleanup()
 
 	// Создаем POST-запрос с URL в теле
 	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader("https://example.com"))
@@ -50,20 +58,8 @@ func ExampleHandler_CreateURL() {
 }
 
 func ExampleHandler_ShortenURL() {
-	// Создаем временный файл для хранилища
-	tmpFile, _ := os.CreateTemp("", "example-*.json")
-	defer os.Remove(tmpFile.Name())
-	defer tmpFile.Close()
-
-	// Инициализируем конфигурацию и сервис
-	cfg := &config.Config{
-		FileStoragePath: tmpFile.Name(),
-		BaseURL:         "http://localhost:8080",
-	}
-	service, _ := app.NewService(cfg)
-	defer service.Close()
-
-	handler := app.NewHandler(service)
+	handler, _, cleanup := setupTestHandler()
+	defer cleanup()
 
 	// Создаем JSON-запрос
 	requestBody := map[string]string{
@@ -91,20 +87,8 @@ func ExampleHandler_ShortenURL() {
 }
 
 func ExampleHandler_BatchShortenURL() {
-	// Создаем временный файл для хранилища
-	tmpFile, _ := os.CreateTemp("", "example-*.json")
-	defer os.Remove(tmpFile.Name())
-	defer tmpFile.Close()
-
-	// Инициализируем конфигурацию и сервис
-	cfg := &config.Config{
-		FileStoragePath: tmpFile.Name(),
-		BaseURL:         "http://localhost:8080",
-	}
-	service, _ := app.NewService(cfg)
-	defer service.Close()
-
-	handler := app.NewHandler(service)
+	handler, _, cleanup := setupTestHandler()
+	defer cleanup()
 
 	// Создаем пакетный запрос
 	requestBody := []map[string]string{
@@ -133,20 +117,8 @@ func ExampleHandler_BatchShortenURL() {
 }
 
 func ExampleHandler_GetUserURLs() {
-	// Создаем временный файл для хранилища
-	tmpFile, _ := os.CreateTemp("", "example-*.json")
-	defer os.Remove(tmpFile.Name())
-	defer tmpFile.Close()
-
-	// Инициализируем конфигурацию и сервис
-	cfg := &config.Config{
-		FileStoragePath: tmpFile.Name(),
-		BaseURL:         "http://localhost:8080",
-	}
-	service, _ := app.NewService(cfg)
-	defer service.Close()
-
-	handler := app.NewHandler(service)
+	handler, _, cleanup := setupTestHandler()
+	defer cleanup()
 
 	// Сначала создаем несколько URL
 	userID := "test-user-id"
@@ -181,20 +153,8 @@ func ExampleHandler_GetUserURLs() {
 }
 
 func ExampleHandler_DeleteUserURLs() {
-	// Создаем временный файл для хранилища
-	tmpFile, _ := os.CreateTemp("", "example-*.json")
-	defer os.Remove(tmpFile.Name())
-	defer tmpFile.Close()
-
-	// Инициализируем конфигурацию и сервис
-	cfg := &config.Config{
-		FileStoragePath: tmpFile.Name(),
-		BaseURL:         "http://localhost:8080",
-	}
-	service, _ := app.NewService(cfg)
-	defer service.Close()
-
-	handler := app.NewHandler(service)
+	handler, cfg, cleanup := setupTestHandler()
+	defer cleanup()
 
 	// Создаем URL для удаления
 	userID := "test-user-id"
