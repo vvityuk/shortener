@@ -1,3 +1,4 @@
+// Package app предоставляет бизнес-логику и HTTP-обработчики для сервиса сокращения URL.
 package app
 
 import (
@@ -66,7 +67,11 @@ func (h *Handler) GetURL(w http.ResponseWriter, r *http.Request) {
 // CreateURL обрабатывает POST-запрос для создания короткого URL из оригинального.
 // Принимает URL в теле запроса и возвращает короткий URL.
 func (h *Handler) CreateURL(w http.ResponseWriter, r *http.Request) {
-	defer r.Body.Close()
+	defer func() {
+		if closeErr := r.Body.Close(); closeErr != nil {
+			http.Error(w, "Failed to close request body", http.StatusInternalServerError)
+		}
+	}()
 
 	userID := middleware.GetUserID(r)
 	if userID == "" {
@@ -74,7 +79,11 @@ func (h *Handler) CreateURL(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	myurl, _ := io.ReadAll(r.Body)
+	myurl, err := io.ReadAll(r.Body)
+	if err != nil {
+		http.Error(w, "Failed to read request body", http.StatusBadRequest)
+		return
+	}
 	shortURL, isNew, err := h.service.CreateURL(string(myurl), userID)
 	if err != nil {
 		http.Error(w, "Failed to create short URL", http.StatusInternalServerError)
@@ -86,13 +95,20 @@ func (h *Handler) CreateURL(w http.ResponseWriter, r *http.Request) {
 	} else {
 		w.WriteHeader(http.StatusCreated)
 	}
-	w.Write([]byte(h.service.config.BaseURL + "/" + shortURL))
+	if _, err := w.Write([]byte(h.service.config.BaseURL + "/" + shortURL)); err != nil {
+		http.Error(w, "Failed to write response", http.StatusInternalServerError)
+		return
+	}
 }
 
 // ShortenURL обрабатывает POST-запрос для создания короткого URL через JSON API.
 // Принимает JSON с полем "url" и возвращает JSON с полем "result".
 func (h *Handler) ShortenURL(w http.ResponseWriter, r *http.Request) {
-	defer r.Body.Close()
+	defer func() {
+		if closeErr := r.Body.Close(); closeErr != nil {
+			http.Error(w, "Failed to close request body", http.StatusInternalServerError)
+		}
+	}()
 
 	userID := middleware.GetUserID(r)
 	if userID == "" {
@@ -127,7 +143,10 @@ func (h *Handler) ShortenURL(w http.ResponseWriter, r *http.Request) {
 	} else {
 		w.WriteHeader(http.StatusCreated)
 	}
-	json.NewEncoder(w).Encode(resp)
+	if err := json.NewEncoder(w).Encode(resp); err != nil {
+		http.Error(w, "Failed to encode response", http.StatusInternalServerError)
+		return
+	}
 }
 
 // PingDB проверяет доступность базы данных.
@@ -143,7 +162,11 @@ func (h *Handler) PingDB(w http.ResponseWriter, r *http.Request) {
 // BatchShortenURL обрабатывает POST-запрос для пакетного создания коротких URL.
 // Принимает массив объектов с полями "correlation_id" и "original_url".
 func (h *Handler) BatchShortenURL(w http.ResponseWriter, r *http.Request) {
-	defer r.Body.Close()
+	defer func() {
+		if closeErr := r.Body.Close(); closeErr != nil {
+			http.Error(w, "Failed to close request body", http.StatusInternalServerError)
+		}
+	}()
 
 	userID := middleware.GetUserID(r)
 	if userID == "" {
@@ -187,7 +210,10 @@ func (h *Handler) BatchShortenURL(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(resp)
+	if err := json.NewEncoder(w).Encode(resp); err != nil {
+		http.Error(w, "Failed to encode response", http.StatusInternalServerError)
+		return
+	}
 }
 
 // GetUserURLs возвращает список всех коротких URL, созданных текущим пользователем.
@@ -219,13 +245,20 @@ func (h *Handler) GetUserURLs(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(resp)
+	if err := json.NewEncoder(w).Encode(resp); err != nil {
+		http.Error(w, "Failed to encode response", http.StatusInternalServerError)
+		return
+	}
 }
 
 // DeleteUserURLs обрабатывает DELETE-запрос для пакетного удаления URL пользователя.
 // Принимает массив коротких URL для удаления. Удаление выполняется асинхронно.
 func (h *Handler) DeleteUserURLs(w http.ResponseWriter, r *http.Request) {
-	defer r.Body.Close()
+	defer func() {
+		if closeErr := r.Body.Close(); closeErr != nil {
+			http.Error(w, "Failed to close request body", http.StatusInternalServerError)
+		}
+	}()
 
 	userID := middleware.GetUserID(r)
 	if userID == "" {

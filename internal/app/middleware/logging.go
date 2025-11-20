@@ -1,3 +1,4 @@
+// Package middleware предоставляет HTTP middleware для аутентификации, логирования и сжатия.
 package middleware
 
 import (

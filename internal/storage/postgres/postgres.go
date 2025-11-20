@@ -1,3 +1,4 @@
+// Package postgres предоставляет реализацию хранилища на основе PostgreSQL.
 package postgres
 
 import (
@@ -107,13 +108,17 @@ func (s *Storage) BatchSave(items map[string]string, userID string) error {
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() {
+		_ = tx.Rollback() // Игнорируем ошибку отката, если транзакция уже закоммичена
+	}()
 
 	stmt, err := tx.Prepare("INSERT INTO urls (short_url, original_url, user_id) VALUES ($1, $2, $3)")
 	if err != nil {
 		return err
 	}
-	defer stmt.Close()
+	defer func() {
+		_ = stmt.Close() // Игнорируем ошибку закрытия statement
+	}()
 
 	for key, value := range items {
 		_, err = stmt.Exec(key, value, userID)
@@ -161,7 +166,9 @@ func (s *Storage) GetUserURLs(userID string) (map[string]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() {
+		_ = rows.Close() // Игнорируем ошибку закрытия rows
+	}()
 
 	urls := make(map[string]string)
 	for rows.Next() {
