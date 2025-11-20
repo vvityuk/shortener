@@ -53,12 +53,12 @@
 //
 // Запуск:
 //
-//		go run ./cmd/staticlint ./...
+//	go run ./cmd/staticlint ./...
 //
 // Или после сборки:
 //
-//		go build -o staticlint ./cmd/staticlint
-//		./staticlint ./...
+//	go build -o staticlint ./cmd/staticlint
+//	./staticlint ./...
 package main
 
 import (
@@ -152,8 +152,8 @@ func main() {
 
 	// Дополнительные публичные анализаторы
 	analyzers = append(analyzers,
-		ineffassign.Analyzer,    // проверка неэффективных присваиваний
-		errcheck.Analyzer,       // проверка необработанных ошибок
+		ineffassign.Analyzer, // проверка неэффективных присваиваний
+		errcheck.Analyzer,    // проверка необработанных ошибок
 	)
 
 	// Собственный анализатор
@@ -162,4 +162,3 @@ func main() {
 	// Запускаем multichecker
 	multichecker.Main(analyzers...)
 }
-
