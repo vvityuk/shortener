@@ -16,6 +16,14 @@ import (
 // Инициализируется значением os.Exit на уровне пакета для обхода проверки статического анализатора.
 var exitFunc = os.Exit
 
+// Глобальные переменные для информации о сборке.
+// Значения устанавливаются через ldflags при компиляции.
+var (
+	buildVersion = "N/A"
+	buildDate    = "N/A"
+	buildCommit  = "N/A"
+)
+
 func main() {
 	if err := run(); err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
@@ -24,6 +32,9 @@ func main() {
 }
 
 func run() error {
+	// Выводим информацию о сборке при старте приложения
+	printBuildInfo()
+
 	logger, err := zap.NewProduction()
 	if err != nil {
 		return fmt.Errorf("failed to initialize logger: %w", err)
@@ -72,4 +83,11 @@ func run() error {
 	}
 
 	return nil
+}
+
+// printBuildInfo выводит информацию о сборке приложения в stdout.
+func printBuildInfo() {
+	fmt.Printf("Build version: %s\n", buildVersion)
+	fmt.Printf("Build date: %s\n", buildDate)
+	fmt.Printf("Build commit: %s\n", buildCommit)
 }
