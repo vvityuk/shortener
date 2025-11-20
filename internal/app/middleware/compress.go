@@ -7,15 +7,26 @@ import (
 	"strings"
 )
 
+// gzipWriter оборачивает http.ResponseWriter и io.Writer для сжатия HTTP-ответов.
+// Позволяет записывать данные через gzip.Writer, обеспечивая автоматическое сжатие ответа.
+// Реализует интерфейс http.ResponseWriter, делегируя запись данных в обёрнутый Writer.
 type gzipWriter struct {
+	// ResponseWriter оригинальный HTTP ResponseWriter для установки заголовков и статусов
 	http.ResponseWriter
+	// Writer обёрнутый Writer (обычно gzip.Writer), который выполняет сжатие данных
 	Writer io.Writer
 }
 
+// Write записывает данные в обёрнутый Writer (gzip.Writer), что обеспечивает сжатие данных.
+// Реализует интерфейс http.ResponseWriter для поддержки сжатия HTTP-ответов.
+// Возвращает количество записанных байт и ошибку при записи данных.
 func (w gzipWriter) Write(b []byte) (int, error) {
 	return w.Writer.Write(b)
 }
 
+// CompressResponse сжимает HTTP-ответы с использованием gzip.
+// Сжатие применяется только если клиент поддерживает gzip (заголовок Accept-Encoding)
+// и для JSON или HTML контента.
 func CompressResponse(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Проверяем, что клиент поддерживает gzip
@@ -44,6 +55,8 @@ func CompressResponse(next http.Handler) http.Handler {
 	})
 }
 
+// DecompressRequest распаковывает сжатые gzip HTTP-запросы.
+// Если запрос содержит заголовок Content-Encoding: gzip, тело запроса автоматически распаковывается.
 func DecompressRequest(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Проверяем, что запрос сжат
