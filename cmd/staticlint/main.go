@@ -157,7 +157,7 @@ func main() {
 	)
 
 	// Собственный анализатор
-	analyzers = append(analyzers, osExitAnalyzer)
+	analyzers = append(analyzers, osexit)
 
 	// Запускаем multichecker
 	multichecker.Main(analyzers...)
