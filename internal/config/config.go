@@ -2,6 +2,7 @@
 package config
 
 import (
+	"encoding/json"
 	"flag"
 	"fmt"
 	"os"
@@ -34,9 +35,20 @@ type Config struct {
 	TLSKeyFile string
 }
 
+// jsonConfig представляет структуру конфигурации в JSON формате.
+type jsonConfig struct {
+	ServerAddress   string `json:"server_address"`
+	BaseURL         string `json:"base_url"`
+	FileStoragePath string `json:"file_storage_path"`
+	DatabaseDSN     string `json:"database_dsn"`
+	EnableHTTPS     bool   `json:"enable_https"`
+	TLSCertFile     string `json:"tls_cert_file,omitempty"`
+	TLSKeyFile      string `json:"tls_key_file,omitempty"`
+}
+
 // NewConfig создает новую конфигурацию приложения.
-// Читает параметры из флагов командной строки и переменных окружения.
-// Переменные окружения имеют приоритет над флагами.
+// Читает параметры из JSON файла, флагов командной строки и переменных окружения.
+// Приоритет: флаги/переменные окружения > JSON файл > значения по умолчанию.
 //
 // Флаги командной строки:
 //
@@ -45,11 +57,13 @@ type Config struct {
 //	-f: путь к файлу хранилища (по умолчанию "urls.json")
 //	-d: строка подключения к БД (по умолчанию пусто)
 //	-s: включить HTTPS режим
-//	-cert: путь к файлу сертификата TLS (по умолчанию "server.crt", если не указан - генерируется автоматически)
-//	-key: путь к файлу приватного ключа TLS (по умолчанию "server.key", если не указан - генерируется автоматически)
+//	-c, -config: путь к JSON файлу конфигурации
+//	-cert: путь к файлу сертификата TLS (по умолчанию пусто, если не указан - генерируется автоматически)
+//	-key: путь к файлу приватного ключа TLS (по умолчанию пусто, если не указан - генерируется автоматически)
 //
 // Переменные окружения:
 //
+//	CONFIG: путь к JSON файлу конфигурации
 //	SERVER_ADDRESS: адрес сервера
 //	BASE_URL: базовый URL
 //	FILE_STORAGE_PATH: путь к файлу хранилища
@@ -58,14 +72,28 @@ type Config struct {
 //	TLS_CERT_FILE: путь к файлу сертификата TLS (если не указан, генерируется автоматически)
 //	TLS_KEY_FILE: путь к файлу приватного ключа TLS (если не указан, генерируется автоматически)
 //
+// Формат JSON файла конфигурации:
+//
+//	{
+//	    "server_address": "localhost:8080",
+//	    "base_url": "http://localhost:8080",
+//	    "file_storage_path": "urls.json",
+//	    "database_dsn": "",
+//	    "enable_https": false,
+//	    "tls_cert_file": "",
+//	    "tls_key_file": ""
+//	}
+//
 // Возвращает конфигурацию приложения или ошибку валидации конфигурации.
 func NewConfig() (*Config, error) {
-	cfg := &Config{}
+	// Флаги для определения пути к конфигурационному файлу
+	configFile := flag.String("c", "", "path to JSON config file")
+	configFileAlt := flag.String("config", "", "path to JSON config file (alternative to -c)")
 
-	// Флаги
-	serverAddress := flag.String("a", "localhost:8080", "server address")
-	baseURL := flag.String("b", "http://localhost:8080", "base URL")
-	fileStoragePath := flag.String("f", "urls.json", "file storage path")
+	// Флаги с значениями по умолчанию
+	serverAddress := flag.String("a", "", "server address")
+	baseURL := flag.String("b", "", "base URL")
+	fileStoragePath := flag.String("f", "", "file storage path")
 	databaseDSN := flag.String("d", "", "database DSN")
 	enableHTTPS := flag.Bool("s", false, "enable HTTPS")
 	tlsCertFile := flag.String("cert", "", "TLS certificate file (if not specified, self-signed certificate will be generated)")
@@ -73,42 +101,125 @@ func NewConfig() (*Config, error) {
 
 	flag.Parse()
 
-	// Переменные окружения
-	if envServerAddress := os.Getenv("SERVER_ADDRESS"); envServerAddress != "" {
-		*serverAddress = envServerAddress
+	// Определяем путь к конфигурационному файлу (приоритет: флаг > переменная окружения)
+	configPath := *configFile
+	if configPath == "" {
+		configPath = *configFileAlt
 	}
-	if envBaseURL := os.Getenv("BASE_URL"); envBaseURL != "" {
-		*baseURL = envBaseURL
-	}
-	if envFileStoragePath := os.Getenv("FILE_STORAGE_PATH"); envFileStoragePath != "" {
-		*fileStoragePath = envFileStoragePath
-	}
-	if envDatabaseDSN := os.Getenv("DATABASE_DSN"); envDatabaseDSN != "" {
-		*databaseDSN = envDatabaseDSN
-	}
-	if envEnableHTTPS := os.Getenv("ENABLE_HTTPS"); envEnableHTTPS != "" {
-		*enableHTTPS = envEnableHTTPS == "true" || envEnableHTTPS == "1"
-	}
-	if envTLSCertFile := os.Getenv("TLS_CERT_FILE"); envTLSCertFile != "" {
-		*tlsCertFile = envTLSCertFile
-	}
-	if envTLSKeyFile := os.Getenv("TLS_KEY_FILE"); envTLSKeyFile != "" {
-		*tlsKeyFile = envTLSKeyFile
+	if configPath == "" {
+		configPath = os.Getenv("CONFIG")
 	}
 
-	cfg.ServerAddress = *serverAddress
-	cfg.BaseURL = *baseURL
-	cfg.FileStoragePath = *fileStoragePath
-	cfg.DatabaseDSN = *databaseDSN
-	cfg.EnableHTTPS = *enableHTTPS
-	cfg.TLSCertFile = *tlsCertFile
-	cfg.TLSKeyFile = *tlsKeyFile
+	// Инициализируем конфигурацию значениями по умолчанию
+	cfg := &Config{
+		ServerAddress:   "localhost:8080",
+		BaseURL:         "http://localhost:8080",
+		FileStoragePath: "urls.json",
+		DatabaseDSN:     "",
+		EnableHTTPS:     false,
+		TLSCertFile:     "",
+		TLSKeyFile:      "",
+	}
+
+	// Загружаем конфигурацию из JSON файла (если указан)
+	if configPath != "" {
+		jsonCfg, err := loadJSONConfig(configPath)
+		if err != nil {
+			return nil, fmt.Errorf("failed to load config file %s: %w", configPath, err)
+		}
+		// Применяем значения из JSON только если они не пустые
+		applyJSONConfig(cfg, jsonCfg)
+	}
+
+	// Применяем флаги командной строки (перезаписывают JSON)
+	// Используем flag.Changed() для проверки, был ли флаг установлен
+	flag.Visit(func(f *flag.Flag) {
+		switch f.Name {
+		case "a":
+			cfg.ServerAddress = *serverAddress
+		case "b":
+			cfg.BaseURL = *baseURL
+		case "f":
+			cfg.FileStoragePath = *fileStoragePath
+		case "d":
+			cfg.DatabaseDSN = *databaseDSN
+		case "s":
+			cfg.EnableHTTPS = *enableHTTPS
+		case "cert":
+			cfg.TLSCertFile = *tlsCertFile
+		case "key":
+			cfg.TLSKeyFile = *tlsKeyFile
+		}
+	})
+
+	// Применяем переменные окружения (перезаписывают JSON и флаги)
+	if envServerAddress := os.Getenv("SERVER_ADDRESS"); envServerAddress != "" {
+		cfg.ServerAddress = envServerAddress
+	}
+	if envBaseURL := os.Getenv("BASE_URL"); envBaseURL != "" {
+		cfg.BaseURL = envBaseURL
+	}
+	if envFileStoragePath := os.Getenv("FILE_STORAGE_PATH"); envFileStoragePath != "" {
+		cfg.FileStoragePath = envFileStoragePath
+	}
+	if envDatabaseDSN := os.Getenv("DATABASE_DSN"); envDatabaseDSN != "" {
+		cfg.DatabaseDSN = envDatabaseDSN
+	}
+	if envEnableHTTPS := os.Getenv("ENABLE_HTTPS"); envEnableHTTPS != "" {
+		cfg.EnableHTTPS = envEnableHTTPS == "true" || envEnableHTTPS == "1"
+	}
+	if envTLSCertFile := os.Getenv("TLS_CERT_FILE"); envTLSCertFile != "" {
+		cfg.TLSCertFile = envTLSCertFile
+	}
+	if envTLSKeyFile := os.Getenv("TLS_KEY_FILE"); envTLSKeyFile != "" {
+		cfg.TLSKeyFile = envTLSKeyFile
+	}
 
 	if err := cfg.validate(); err != nil {
 		return nil, fmt.Errorf("invalid config: %w", err)
 	}
 
 	return cfg, nil
+}
+
+// loadJSONConfig загружает конфигурацию из JSON файла.
+func loadJSONConfig(path string) (*jsonConfig, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read config file: %w", err)
+	}
+
+	var jsonCfg jsonConfig
+	if err := json.Unmarshal(data, &jsonCfg); err != nil {
+		return nil, fmt.Errorf("failed to parse JSON config: %w", err)
+	}
+
+	return &jsonCfg, nil
+}
+
+// applyJSONConfig применяет значения из JSON конфигурации к Config.
+// Применяет только непустые значения.
+func applyJSONConfig(cfg *Config, jsonCfg *jsonConfig) {
+	if jsonCfg.ServerAddress != "" {
+		cfg.ServerAddress = jsonCfg.ServerAddress
+	}
+	if jsonCfg.BaseURL != "" {
+		cfg.BaseURL = jsonCfg.BaseURL
+	}
+	if jsonCfg.FileStoragePath != "" {
+		cfg.FileStoragePath = jsonCfg.FileStoragePath
+	}
+	if jsonCfg.DatabaseDSN != "" {
+		cfg.DatabaseDSN = jsonCfg.DatabaseDSN
+	}
+	// Для bool всегда применяем значение из JSON, если оно задано
+	cfg.EnableHTTPS = jsonCfg.EnableHTTPS
+	if jsonCfg.TLSCertFile != "" {
+		cfg.TLSCertFile = jsonCfg.TLSCertFile
+	}
+	if jsonCfg.TLSKeyFile != "" {
+		cfg.TLSKeyFile = jsonCfg.TLSKeyFile
+	}
 }
 
 func (cfg *Config) validate() error {
