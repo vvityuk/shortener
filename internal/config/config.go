@@ -33,6 +33,10 @@ type Config struct {
 
 	// TLSKeyFile путь к файлу приватного ключа TLS (например, "server.key")
 	TLSKeyFile string
+
+	// TrustedSubnet строковое представление доверенной подсети в формате CIDR (например, "192.168.0.0/24")
+	// Используется для проверки доступа к internal эндпоинтам
+	TrustedSubnet string
 }
 
 // jsonConfig представляет структуру конфигурации в JSON формате.
@@ -44,6 +48,7 @@ type jsonConfig struct {
 	EnableHTTPS     bool   `json:"enable_https"`
 	TLSCertFile     string `json:"tls_cert_file,omitempty"`
 	TLSKeyFile      string `json:"tls_key_file,omitempty"`
+	TrustedSubnet   string `json:"trusted_subnet,omitempty"`
 }
 
 // NewConfig создает новую конфигурацию приложения.
@@ -60,6 +65,7 @@ type jsonConfig struct {
 //	-c, -config: путь к JSON файлу конфигурации
 //	-cert: путь к файлу сертификата TLS (по умолчанию пусто, если не указан - генерируется автоматически)
 //	-key: путь к файлу приватного ключа TLS (по умолчанию пусто, если не указан - генерируется автоматически)
+//	-t: доверенная подсеть в формате CIDR (по умолчанию пусто)
 //
 // Переменные окружения:
 //
@@ -71,6 +77,7 @@ type jsonConfig struct {
 //	ENABLE_HTTPS: включить HTTPS (значение "true" или "1")
 //	TLS_CERT_FILE: путь к файлу сертификата TLS (если не указан, генерируется автоматически)
 //	TLS_KEY_FILE: путь к файлу приватного ключа TLS (если не указан, генерируется автоматически)
+//	TRUSTED_SUBNET: доверенная подсеть в формате CIDR
 //
 // Формат JSON файла конфигурации:
 //
@@ -81,7 +88,8 @@ type jsonConfig struct {
 //	    "database_dsn": "",
 //	    "enable_https": false,
 //	    "tls_cert_file": "",
-//	    "tls_key_file": ""
+//	    "tls_key_file": "",
+//	    "trusted_subnet": ""
 //	}
 //
 // Возвращает конфигурацию приложения или ошибку валидации конфигурации.
@@ -98,6 +106,7 @@ func NewConfig() (*Config, error) {
 	enableHTTPS := flag.Bool("s", false, "enable HTTPS")
 	tlsCertFile := flag.String("cert", "", "TLS certificate file (if not specified, self-signed certificate will be generated)")
 	tlsKeyFile := flag.String("key", "", "TLS private key file (if not specified, self-signed certificate will be generated)")
+	trustedSubnet := flag.String("t", "", "trusted subnet in CIDR notation")
 
 	flag.Parse()
 
@@ -119,6 +128,7 @@ func NewConfig() (*Config, error) {
 		EnableHTTPS:     false,
 		TLSCertFile:     "",
 		TLSKeyFile:      "",
+		TrustedSubnet:   "",
 	}
 
 	// Загружаем конфигурацию из JSON файла (если указан)
@@ -149,6 +159,8 @@ func NewConfig() (*Config, error) {
 			cfg.TLSCertFile = *tlsCertFile
 		case "key":
 			cfg.TLSKeyFile = *tlsKeyFile
+		case "t":
+			cfg.TrustedSubnet = *trustedSubnet
 		}
 	})
 
@@ -173,6 +185,9 @@ func NewConfig() (*Config, error) {
 	}
 	if envTLSKeyFile := os.Getenv("TLS_KEY_FILE"); envTLSKeyFile != "" {
 		cfg.TLSKeyFile = envTLSKeyFile
+	}
+	if envTrustedSubnet := os.Getenv("TRUSTED_SUBNET"); envTrustedSubnet != "" {
+		cfg.TrustedSubnet = envTrustedSubnet
 	}
 
 	if err := cfg.validate(); err != nil {
@@ -219,6 +234,9 @@ func applyJSONConfig(cfg *Config, jsonCfg *jsonConfig) {
 	}
 	if jsonCfg.TLSKeyFile != "" {
 		cfg.TLSKeyFile = jsonCfg.TLSKeyFile
+	}
+	if jsonCfg.TrustedSubnet != "" {
+		cfg.TrustedSubnet = jsonCfg.TrustedSubnet
 	}
 }
 

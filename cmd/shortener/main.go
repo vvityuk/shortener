@@ -95,6 +95,9 @@ func run() error {
 	r.Get("/api/user/urls", handler.GetUserURLs)
 	r.Delete("/api/user/urls", handler.DeleteUserURLs)
 
+	// Internal эндпоинты с проверкой доверенной подсети
+	r.With(middleware.TrustedSubnetMiddleware(cfg.TrustedSubnet)).Get("/api/internal/stats", handler.InternalStats)
+
 	// Запуск сервера с поддержкой graceful shutdown
 	if cfg.EnableHTTPS {
 		return startHTTPSServer(cfg, r, logger, service)

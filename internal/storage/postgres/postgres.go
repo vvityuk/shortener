@@ -225,3 +225,21 @@ func (s *Storage) BatchDelete(shortURLs []string, userID string) error {
 
 	return nil
 }
+
+// GetStats возвращает статистику: количество сокращённых URL и количество пользователей.
+// Выполняет SQL-запросы для подсчета количества записей и уникальных пользователей.
+func (s *Storage) GetStats() (int, int, error) {
+	var urlsCount int
+	err := s.db.QueryRow("SELECT COUNT(*) FROM urls").Scan(&urlsCount)
+	if err != nil {
+		return 0, 0, err
+	}
+
+	var usersCount int
+	err = s.db.QueryRow("SELECT COUNT(DISTINCT user_id) FROM urls").Scan(&usersCount)
+	if err != nil {
+		return 0, 0, err
+	}
+
+	return urlsCount, usersCount, nil
+}

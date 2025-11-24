@@ -288,3 +288,66 @@ func TestHandlers(t *testing.T) {
 		}
 	})
 }
+
+func TestInternalStats(t *testing.T) {
+	// Создаем временный файл для тестов
+	tmpFile, err := os.CreateTemp("", "stats-test-*.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Remove(tmpFile.Name())
+	defer tmpFile.Close()
+
+	// Создаем конфигурацию
+	cfg := &config.Config{
+		FileStoragePath: tmpFile.Name(),
+		BaseURL:         "http://localhost:8080",
+	}
+
+	// Создаем сервис и обработчик
+	service, err := NewService(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer service.Close()
+	handler := NewHandler(service)
+
+	// Добавляем тестовые данные
+	_, _, err = service.CreateURL("https://example1.com", "user1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _, err = service.CreateURL("https://example2.com", "user1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _, err = service.CreateURL("https://example3.com", "user2")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Тест получения статистики
+	t.Run("Get stats", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/api/internal/stats", nil)
+		w := httptest.NewRecorder()
+
+		handler.InternalStats(w, req)
+
+		if w.Code != http.StatusOK {
+			t.Errorf("Expected status %d, got %d", http.StatusOK, w.Code)
+		}
+
+		var stats statsResponse
+		if err := json.NewDecoder(w.Body).Decode(&stats); err != nil {
+			t.Errorf("Failed to decode response: %v", err)
+		}
+
+		if stats.URLs != 3 {
+			t.Errorf("Expected 3 URLs, got %d", stats.URLs)
+		}
+
+		if stats.Users != 2 {
+			t.Errorf("Expected 2 users, got %d", stats.Users)
+		}
+	})
+}
