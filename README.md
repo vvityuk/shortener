@@ -30,3 +30,11 @@ git fetch template && git checkout template/main .github
 При мёрже ветки с инкрементом в основную ветку `main` будут запускаться все автотесты.
 
 Подробнее про локальный и автоматический запуск читайте в [README автотестов](https://github.com/Yandex-Practicum/go-autotests).
+
+Приложение поддерживает установку информации о сборке через флаги линковщика (`-ldflags`). Переменные `buildVersion`, `buildDate` и `buildCommit` устанавливаются на этапе компиляции.
+
+Пример сборки с указанием всех переменных:
+```bash
+go build -ldflags "-X main.buildVersion=1.0.0 -X main.buildDate=$(date +%Y-%m-%d_%H:%M:%S) -X main.buildCommit=$(git rev-parse HEAD)" -o shortener ./cmd/shortener
+```
+

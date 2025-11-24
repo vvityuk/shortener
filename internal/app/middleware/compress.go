@@ -1,3 +1,4 @@
+// Package middleware предоставляет HTTP middleware для аутентификации, логирования и сжатия.
 package middleware
 
 import (
@@ -45,10 +46,16 @@ func CompressResponse(next http.Handler) http.Handler {
 		// Создаем gzip.Writer поверх текущего w
 		gz, err := gzip.NewWriterLevel(w, gzip.BestSpeed)
 		if err != nil {
-			io.WriteString(w, err.Error())
+			if _, writeErr := io.WriteString(w, err.Error()); writeErr != nil {
+				http.Error(w, "Failed to write error", http.StatusInternalServerError)
+			}
 			return
 		}
-		defer gz.Close()
+		defer func() {
+			if closeErr := gz.Close(); closeErr != nil {
+				http.Error(w, "Failed to close gzip writer", http.StatusInternalServerError)
+			}
+		}()
 
 		w.Header().Set("Content-Encoding", "gzip")
 		next.ServeHTTP(gzipWriter{ResponseWriter: w, Writer: gz}, r)
@@ -71,7 +78,11 @@ func DecompressRequest(next http.Handler) http.Handler {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		defer gz.Close()
+		defer func() {
+			if closeErr := gz.Close(); closeErr != nil {
+				http.Error(w, "Failed to close gzip reader", http.StatusInternalServerError)
+			}
+		}()
 
 		// Заменяем тело запроса на распакованное
 		r.Body = io.NopCloser(gz)
