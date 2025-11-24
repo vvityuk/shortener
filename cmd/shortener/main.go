@@ -21,7 +21,11 @@ import (
 	"github.com/vvityuk/shortener/internal/app"
 	"github.com/vvityuk/shortener/internal/app/middleware"
 	"github.com/vvityuk/shortener/internal/config"
+	grpcserver "github.com/vvityuk/shortener/internal/grpc"
+	"github.com/vvityuk/shortener/internal/grpc/interceptors"
+	pb "github.com/vvityuk/shortener/pkg/grpc/pb"
 	"go.uber.org/zap"
+	"google.golang.org/grpc"
 )
 
 // Константы таймаутов для HTTP сервера.
@@ -98,7 +102,13 @@ func run() error {
 	// Internal эндпоинты с проверкой доверенной подсети
 	r.With(middleware.TrustedSubnetMiddleware(cfg.TrustedSubnet)).Get("/api/internal/stats", handler.InternalStats)
 
-	// Запуск сервера с поддержкой graceful shutdown
+	// Запуск серверов с поддержкой graceful shutdown
+	// Если указан gRPC адрес, запускаем оба сервера
+	if cfg.GRPCAddress != "" {
+		return startBothServers(cfg, r, logger, service)
+	}
+
+	// Запуск только HTTP сервера
 	if cfg.EnableHTTPS {
 		return startHTTPSServer(cfg, r, logger, service)
 	}
@@ -302,4 +312,130 @@ func printBuildInfo() {
 	fmt.Printf("Build version: %s\n", buildVersion)
 	fmt.Printf("Build date: %s\n", buildDate)
 	fmt.Printf("Build commit: %s\n", buildCommit)
+}
+
+// startBothServers запускает HTTP и gRPC серверы параллельно с поддержкой graceful shutdown.
+func startBothServers(cfg *config.Config, httpHandler http.Handler, logger *zap.Logger, service *app.Service) error {
+	// Создаем HTTP сервер
+	var httpServer *http.Server
+	if cfg.EnableHTTPS {
+		// Проверяем существование файлов сертификатов
+		certExists := fileExists(cfg.TLSCertFile)
+		keyExists := fileExists(cfg.TLSKeyFile)
+
+		var tlsConfig *tls.Config
+		if certExists && keyExists {
+			cert, err := tls.LoadX509KeyPair(cfg.TLSCertFile, cfg.TLSKeyFile)
+			if err != nil {
+				return fmt.Errorf("failed to load TLS certificate: %w", err)
+			}
+			tlsConfig = &tls.Config{
+				Certificates: []tls.Certificate{cert},
+			}
+		} else {
+			cert, err := generateSelfSignedCert()
+			if err != nil {
+				return fmt.Errorf("failed to generate self-signed certificate: %w", err)
+			}
+			tlsConfig = &tls.Config{
+				Certificates: []tls.Certificate{cert},
+			}
+		}
+
+		httpServer = &http.Server{
+			Addr:         cfg.ServerAddress,
+			Handler:      httpHandler,
+			TLSConfig:    tlsConfig,
+			ReadTimeout:  readTimeout,
+			WriteTimeout: writeTimeout,
+			IdleTimeout:  idleTimeout,
+		}
+	} else {
+		httpServer = &http.Server{
+			Addr:         cfg.ServerAddress,
+			Handler:      httpHandler,
+			ReadTimeout:  readTimeout,
+			WriteTimeout: writeTimeout,
+			IdleTimeout:  idleTimeout,
+		}
+	}
+
+	// Создаем gRPC сервер
+	grpcServer := grpc.NewServer(
+		grpc.UnaryInterceptor(interceptors.AuthInterceptor()),
+	)
+	grpcHandler := grpcserver.NewServer(service)
+	pb.RegisterShortenerServiceServer(grpcServer, grpcHandler)
+
+	// Канал для перехвата сигналов завершения
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, syscall.SIGTERM, syscall.SIGINT, syscall.SIGQUIT)
+	defer signal.Stop(sigChan)
+
+	// Канал для ошибок серверов
+	serverErrors := make(chan error, 2)
+
+	// Запускаем HTTP сервер в горутине
+	go func() {
+		var err error
+		if cfg.EnableHTTPS {
+			logger.Info("HTTPS server started", zap.String("address", httpServer.Addr))
+			err = httpServer.ListenAndServeTLS("", "")
+		} else {
+			logger.Info("HTTP server started", zap.String("address", httpServer.Addr))
+			err = httpServer.ListenAndServe()
+		}
+		if err != nil && err != http.ErrServerClosed {
+			serverErrors <- fmt.Errorf("HTTP server error: %w", err)
+		}
+	}()
+
+	// Запускаем gRPC сервер в горутине
+	go func() {
+		lis, err := net.Listen("tcp", cfg.GRPCAddress)
+		if err != nil {
+			serverErrors <- fmt.Errorf("failed to listen gRPC: %w", err)
+			return
+		}
+		logger.Info("gRPC server started", zap.String("address", cfg.GRPCAddress))
+		if err := grpcServer.Serve(lis); err != nil {
+			serverErrors <- fmt.Errorf("gRPC server error: %w", err)
+		}
+	}()
+
+	// Ожидаем сигнал завершения или ошибку запуска
+	select {
+	case sig := <-sigChan:
+		logger.Info("Received shutdown signal", zap.String("signal", sig.String()))
+		return gracefulShutdownBoth(httpServer, grpcServer, logger, service)
+	case err := <-serverErrors:
+		return err
+	}
+}
+
+// gracefulShutdownBoth выполняет плавное завершение работы HTTP и gRPC серверов.
+func gracefulShutdownBoth(httpServer *http.Server, grpcServer *grpc.Server, logger *zap.Logger, service *app.Service) error {
+	ctx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
+	defer cancel()
+
+	logger.Info("Shutting down servers gracefully...")
+
+	// Останавливаем HTTP сервер
+	if err := httpServer.Shutdown(ctx); err != nil {
+		logger.Error("Error during HTTP server shutdown", zap.Error(err))
+	}
+
+	// Останавливаем gRPC сервер
+	grpcServer.GracefulStop()
+
+	logger.Info("Servers stopped, saving data...")
+
+	// Закрываем сервис и сохраняем все данные
+	if err := service.Close(); err != nil {
+		logger.Error("Error closing service", zap.Error(err))
+		return fmt.Errorf("failed to close service: %w", err)
+	}
+
+	logger.Info("Graceful shutdown completed")
+	return nil
 }

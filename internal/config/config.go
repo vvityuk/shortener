@@ -14,6 +14,9 @@ type Config struct {
 	// ServerAddress адрес и порт для запуска HTTP-сервера (например, "localhost:8080")
 	ServerAddress string
 
+	// GRPCAddress адрес и порт для запуска gRPC-сервера (например, "localhost:3200")
+	GRPCAddress string
+
 	// BaseURL базовый URL для генерации коротких ссылок (например, "http://localhost:8080")
 	BaseURL string
 
@@ -42,6 +45,7 @@ type Config struct {
 // jsonConfig представляет структуру конфигурации в JSON формате.
 type jsonConfig struct {
 	ServerAddress   string `json:"server_address"`
+	GRPCAddress     string `json:"grpc_address,omitempty"`
 	BaseURL         string `json:"base_url"`
 	FileStoragePath string `json:"file_storage_path"`
 	DatabaseDSN     string `json:"database_dsn"`
@@ -58,6 +62,7 @@ type jsonConfig struct {
 // Флаги командной строки:
 //
 //	-a: адрес сервера (по умолчанию "localhost:8080")
+//	-g: адрес gRPC сервера (по умолчанию пусто)
 //	-b: базовый URL (по умолчанию "http://localhost:8080")
 //	-f: путь к файлу хранилища (по умолчанию "urls.json")
 //	-d: строка подключения к БД (по умолчанию пусто)
@@ -71,6 +76,7 @@ type jsonConfig struct {
 //
 //	CONFIG: путь к JSON файлу конфигурации
 //	SERVER_ADDRESS: адрес сервера
+//	GRPC_ADDRESS: адрес gRPC сервера
 //	BASE_URL: базовый URL
 //	FILE_STORAGE_PATH: путь к файлу хранилища
 //	DATABASE_DSN: строка подключения к БД
@@ -83,6 +89,7 @@ type jsonConfig struct {
 //
 //	{
 //	    "server_address": "localhost:8080",
+//	    "grpc_address": "localhost:3200",
 //	    "base_url": "http://localhost:8080",
 //	    "file_storage_path": "urls.json",
 //	    "database_dsn": "",
@@ -100,6 +107,7 @@ func NewConfig() (*Config, error) {
 
 	// Флаги с значениями по умолчанию
 	serverAddress := flag.String("a", "", "server address")
+	grpcAddress := flag.String("g", "", "gRPC server address")
 	baseURL := flag.String("b", "", "base URL")
 	fileStoragePath := flag.String("f", "", "file storage path")
 	databaseDSN := flag.String("d", "", "database DSN")
@@ -122,6 +130,7 @@ func NewConfig() (*Config, error) {
 	// Инициализируем конфигурацию значениями по умолчанию
 	cfg := &Config{
 		ServerAddress:   "localhost:8080",
+		GRPCAddress:     "localhost:3200",
 		BaseURL:         "http://localhost:8080",
 		FileStoragePath: "urls.json",
 		DatabaseDSN:     "",
@@ -147,6 +156,8 @@ func NewConfig() (*Config, error) {
 		switch f.Name {
 		case "a":
 			cfg.ServerAddress = *serverAddress
+		case "g":
+			cfg.GRPCAddress = *grpcAddress
 		case "b":
 			cfg.BaseURL = *baseURL
 		case "f":
@@ -167,6 +178,9 @@ func NewConfig() (*Config, error) {
 	// Применяем переменные окружения (перезаписывают JSON и флаги)
 	if envServerAddress := os.Getenv("SERVER_ADDRESS"); envServerAddress != "" {
 		cfg.ServerAddress = envServerAddress
+	}
+	if envGRPCAddress := os.Getenv("GRPC_ADDRESS"); envGRPCAddress != "" {
+		cfg.GRPCAddress = envGRPCAddress
 	}
 	if envBaseURL := os.Getenv("BASE_URL"); envBaseURL != "" {
 		cfg.BaseURL = envBaseURL
@@ -217,6 +231,9 @@ func loadJSONConfig(path string) (*jsonConfig, error) {
 func applyJSONConfig(cfg *Config, jsonCfg *jsonConfig) {
 	if jsonCfg.ServerAddress != "" {
 		cfg.ServerAddress = jsonCfg.ServerAddress
+	}
+	if jsonCfg.GRPCAddress != "" {
+		cfg.GRPCAddress = jsonCfg.GRPCAddress
 	}
 	if jsonCfg.BaseURL != "" {
 		cfg.BaseURL = jsonCfg.BaseURL

@@ -56,3 +56,19 @@ func GetUserID(r *http.Request) string {
 	}
 	return cookie.Value
 }
+
+// GenerateToken генерирует новый токен авторизации и возвращает userID и токен.
+// Используется для аутентификации в gRPC.
+func GenerateToken() (string, string, error) {
+	userID := generateUserID()
+	return userID, userID, nil
+}
+
+// ValidateToken проверяет валидность токена и возвращает userID.
+// Если токен невалидный, возвращает ошибку.
+func ValidateToken(token string) (string, error) {
+	if !isValidCookie(token) {
+		return "", http.ErrNoCookie
+	}
+	return token, nil
+}

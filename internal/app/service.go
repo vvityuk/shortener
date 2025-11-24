@@ -127,3 +127,8 @@ func (s *Service) BatchDelete(shortURLs []string, userID string) {
 func (s *Service) GetStats() (int, int, error) {
 	return s.storage.GetStats()
 }
+
+// GetBaseURL возвращает базовый URL для генерации коротких ссылок.
+func (s *Service) GetBaseURL() string {
+	return s.config.BaseURL
+}
