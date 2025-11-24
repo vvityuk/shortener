@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/tls"
@@ -12,6 +13,8 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -19,6 +22,14 @@ import (
 	"github.com/vvityuk/shortener/internal/app/middleware"
 	"github.com/vvityuk/shortener/internal/config"
 	"go.uber.org/zap"
+)
+
+// Константы таймаутов для HTTP сервера.
+const (
+	shutdownTimeout = 30 * time.Second
+	readTimeout     = 15 * time.Second
+	writeTimeout    = 15 * time.Second
+	idleTimeout     = 60 * time.Second
 )
 
 // exitFunc используется для выхода из программы с кодом возврата.
@@ -66,11 +77,7 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("failed to initialize service: %w", err)
 	}
-	defer func() {
-		if closeErr := service.Close(); closeErr != nil {
-			fmt.Fprintf(os.Stderr, "failed to close service: %v\n", closeErr)
-		}
-	}()
+	// Закрытие сервиса теперь обрабатывается в gracefulShutdown()
 
 	handler := app.NewHandler(service)
 
@@ -88,23 +95,29 @@ func run() error {
 	r.Get("/api/user/urls", handler.GetUserURLs)
 	r.Delete("/api/user/urls", handler.DeleteUserURLs)
 
-	// Запуск сервера
+	// Запуск сервера с поддержкой graceful shutdown
 	if cfg.EnableHTTPS {
-		if err := startHTTPSServer(cfg, r, logger); err != nil {
-			return err
-		}
-	} else {
-		logger.Info("Starting HTTP server", zap.String("address", cfg.ServerAddress))
-		if err := http.ListenAndServe(cfg.ServerAddress, r); err != nil {
-			return fmt.Errorf("failed to start server: %w", err)
-		}
+		return startHTTPSServer(cfg, r, logger, service)
 	}
-
-	return nil
+	return startHTTPServer(cfg, r, logger, service)
 }
 
-// startHTTPSServer запускает HTTPS сервер с автоматической генерацией сертификата при необходимости.
-func startHTTPSServer(cfg *config.Config, handler http.Handler, logger *zap.Logger) error {
+// startHTTPServer запускает HTTP сервер с поддержкой graceful shutdown.
+func startHTTPServer(cfg *config.Config, handler http.Handler, logger *zap.Logger, service *app.Service) error {
+	server := &http.Server{
+		Addr:         cfg.ServerAddress,
+		Handler:      handler,
+		ReadTimeout:  readTimeout,
+		WriteTimeout: writeTimeout,
+		IdleTimeout:  idleTimeout,
+	}
+
+	return runServerWithGracefulShutdown(server, logger, service, false)
+}
+
+// startHTTPSServer запускает HTTPS сервер с автоматической генерацией сертификата при необходимости
+// и поддержкой graceful shutdown.
+func startHTTPSServer(cfg *config.Config, handler http.Handler, logger *zap.Logger, service *app.Service) error {
 	// Проверяем существование файлов сертификатов
 	certExists := fileExists(cfg.TLSCertFile)
 	keyExists := fileExists(cfg.TLSKeyFile)
@@ -141,15 +154,83 @@ func startHTTPSServer(cfg *config.Config, handler http.Handler, logger *zap.Logg
 		}
 	}
 
-	// Создаем listener с TLS
-	listener, err := tls.Listen("tcp", cfg.ServerAddress, tlsConfig)
-	if err != nil {
-		return fmt.Errorf("failed to create TLS listener: %w", err)
+	// Создаем сервер с TLS конфигурацией и таймаутами
+	server := &http.Server{
+		Addr:         cfg.ServerAddress,
+		Handler:      handler,
+		TLSConfig:    tlsConfig,
+		ReadTimeout:  readTimeout,
+		WriteTimeout: writeTimeout,
+		IdleTimeout:  idleTimeout,
 	}
-	defer listener.Close()
 
-	logger.Info("HTTPS server started", zap.String("address", cfg.ServerAddress))
-	return http.Serve(listener, handler)
+	return runServerWithGracefulShutdown(server, logger, service, true)
+}
+
+// runServerWithGracefulShutdown запускает сервер с обработкой сигналов завершения.
+func runServerWithGracefulShutdown(server *http.Server, logger *zap.Logger, service *app.Service, isTLS bool) error {
+	// Канал для перехвата сигналов завершения
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, syscall.SIGTERM, syscall.SIGINT, syscall.SIGQUIT)
+	// Важно: освобождаем ресурсы signal.Notify при завершении
+	defer signal.Stop(sigChan)
+
+	// Канал для ошибок сервера
+	serverErrors := make(chan error, 1)
+
+	// Запускаем сервер в горутине
+	go func() {
+		var err error
+		if isTLS {
+			logger.Info("HTTPS server started", zap.String("address", server.Addr))
+			// Используем пустые строки для cert и key, так как они уже в TLSConfig
+			err = server.ListenAndServeTLS("", "")
+		} else {
+			logger.Info("Starting HTTP server", zap.String("address", server.Addr))
+			err = server.ListenAndServe()
+		}
+		serverErrors <- err
+	}()
+
+	// Ожидаем сигнал завершения или ошибку запуска
+	select {
+	case sig := <-sigChan:
+		logger.Info("Received shutdown signal", zap.String("signal", sig.String()))
+		return gracefulShutdown(server, logger, service)
+	case err := <-serverErrors:
+		if err != nil && err != http.ErrServerClosed {
+			return fmt.Errorf("failed to start server: %w", err)
+		}
+	}
+
+	return nil
+}
+
+// gracefulShutdown выполняет плавное завершение работы сервера.
+// Ожидает завершения всех активных запросов и сохраняет данные в хранилище.
+func gracefulShutdown(server *http.Server, logger *zap.Logger, service *app.Service) error {
+	// Создаем контекст с таймаутом для завершения
+	ctx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
+	defer cancel()
+
+	logger.Info("Shutting down server gracefully...")
+
+	// Инициируем graceful shutdown сервера
+	if err := server.Shutdown(ctx); err != nil {
+		logger.Error("Error during server shutdown", zap.Error(err))
+		return fmt.Errorf("server shutdown failed: %w", err)
+	}
+
+	logger.Info("Server stopped, saving data...")
+
+	// Закрываем сервис и сохраняем все данные
+	if err := service.Close(); err != nil {
+		logger.Error("Error closing service", zap.Error(err))
+		return fmt.Errorf("failed to close service: %w", err)
+	}
+
+	logger.Info("Graceful shutdown completed")
+	return nil
 }
 
 // generateSelfSignedCert генерирует самоподписанный сертификат для использования в HTTPS.
@@ -160,16 +241,19 @@ func generateSelfSignedCert() (tls.Certificate, error) {
 		return tls.Certificate{}, fmt.Errorf("failed to generate private key: %w", err)
 	}
 
+	// Генерируем случайный серийный номер (требование безопасности)
+	serialNumberLimit := new(big.Int).Lsh(big.NewInt(1), 128)
+	serialNumber, err := rand.Int(rand.Reader, serialNumberLimit)
+	if err != nil {
+		return tls.Certificate{}, fmt.Errorf("failed to generate serial number: %w", err)
+	}
+
 	// Создаем шаблон сертификата
 	template := x509.Certificate{
-		SerialNumber: big.NewInt(1),
+		SerialNumber: serialNumber,
 		Subject: pkix.Name{
-			Organization:  []string{"Shortener"},
-			Country:       []string{"RU"},
-			Province:      []string{""},
-			Locality:      []string{""},
-			StreetAddress: []string{""},
-			PostalCode:    []string{""},
+			Organization: []string{"Shortener"},
+			Country:      []string{"RU"},
 		},
 		NotBefore:             time.Now(),
 		NotAfter:              time.Now().Add(365 * 24 * time.Hour), // Действителен 1 год
