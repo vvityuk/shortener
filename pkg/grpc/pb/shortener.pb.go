@@ -410,6 +410,7 @@ func file_api_proto_shortener_proto_init() {
 		return
 	}
 	if !protoimpl.UnsafeEnabled {
+		//nolint:staticcheck
 		file_api_proto_shortener_proto_msgTypes[0].Exporter = func(v interface{}, i int) interface{} {
 			switch v := v.(*URLShortenRequest); i {
 			case 0:
@@ -422,6 +423,7 @@ func file_api_proto_shortener_proto_init() {
 				return nil
 			}
 		}
+		//nolint:staticcheck
 		file_api_proto_shortener_proto_msgTypes[1].Exporter = func(v interface{}, i int) interface{} {
 			switch v := v.(*URLShortenResponse); i {
 			case 0:
@@ -434,6 +436,7 @@ func file_api_proto_shortener_proto_init() {
 				return nil
 			}
 		}
+		//nolint:staticcheck
 		file_api_proto_shortener_proto_msgTypes[2].Exporter = func(v interface{}, i int) interface{} {
 			switch v := v.(*URLExpandRequest); i {
 			case 0:
@@ -446,6 +449,7 @@ func file_api_proto_shortener_proto_init() {
 				return nil
 			}
 		}
+		//nolint:staticcheck
 		file_api_proto_shortener_proto_msgTypes[3].Exporter = func(v interface{}, i int) interface{} {
 			switch v := v.(*URLExpandResponse); i {
 			case 0:
@@ -470,6 +474,7 @@ func file_api_proto_shortener_proto_init() {
 				return nil
 			}
 		}
+		//nolint:staticcheck
 		file_api_proto_shortener_proto_msgTypes[5].Exporter = func(v interface{}, i int) interface{} {
 			switch v := v.(*URLData); i {
 			case 0:
