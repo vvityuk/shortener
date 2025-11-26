@@ -77,7 +77,6 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("failed to initialize service: %w", err)
 	}
-	// Закрытие сервиса теперь обрабатывается в gracefulShutdown()
 
 	handler := app.NewHandler(service)
 
@@ -95,86 +94,82 @@ func run() error {
 	r.Get("/api/user/urls", handler.GetUserURLs)
 	r.Delete("/api/user/urls", handler.DeleteUserURLs)
 
+	// Создаем контекст для graceful shutdown
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT, syscall.SIGQUIT)
+	defer stop()
+
 	// Запуск сервера с поддержкой graceful shutdown
+	var server *http.Server
 	if cfg.EnableHTTPS {
-		return startHTTPSServer(cfg, r, logger, service)
+		server, err = createHTTPSServer(cfg, r, logger)
+		if err != nil {
+			return fmt.Errorf("failed to create HTTPS server: %w", err)
+		}
+	} else {
+		server = createHTTPServer(cfg, r)
 	}
-	return startHTTPServer(cfg, r, logger, service)
+
+	return runServerWithGracefulShutdown(ctx, server, logger, service, cfg.EnableHTTPS)
 }
 
-// startHTTPServer запускает HTTP сервер с поддержкой graceful shutdown.
-func startHTTPServer(cfg *config.Config, handler http.Handler, logger *zap.Logger, service *app.Service) error {
-	server := &http.Server{
+// createHTTPServer создает HTTP сервер.
+func createHTTPServer(cfg *config.Config, handler http.Handler) *http.Server {
+	return &http.Server{
 		Addr:         cfg.ServerAddress,
 		Handler:      handler,
 		ReadTimeout:  readTimeout,
 		WriteTimeout: writeTimeout,
 		IdleTimeout:  idleTimeout,
 	}
-
-	return runServerWithGracefulShutdown(server, logger, service, false)
 }
 
-// startHTTPSServer запускает HTTPS сервер с автоматической генерацией сертификата при необходимости
-// и поддержкой graceful shutdown.
-func startHTTPSServer(cfg *config.Config, handler http.Handler, logger *zap.Logger, service *app.Service) error {
-	// Проверяем существование файлов сертификатов
-	certExists := fileExists(cfg.TLSCertFile)
-	keyExists := fileExists(cfg.TLSKeyFile)
-
+// createHTTPSServer создает HTTPS сервер с автоматической генерацией сертификата при необходимости.
+func createHTTPSServer(cfg *config.Config, handler http.Handler, logger *zap.Logger) (*http.Server, error) {
 	var tlsConfig *tls.Config
 
-	if certExists && keyExists {
-		// Используем существующие файлы сертификатов
+	// Пытаемся загрузить сертификат из файлов
+	cert, err := tls.LoadX509KeyPair(cfg.TLSCertFile, cfg.TLSKeyFile)
+	if err != nil {
+		// Если файлы не существуют, генерируем самоподписанный сертификат
+		if os.IsNotExist(err) {
+			logger.Info("Certificate files not found, generating self-signed certificate for HTTPS",
+				zap.String("address", cfg.ServerAddress),
+			)
+			cert, err = generateSelfSignedCert()
+			if err != nil {
+				return nil, fmt.Errorf("failed to generate self-signed certificate: %w", err)
+			}
+		} else {
+			// Другие ошибки (неправильный формат, проблемы с правами доступа и т.д.)
+			return nil, fmt.Errorf("failed to load TLS certificate: %w", err)
+		}
+	} else {
+		// Сертификат успешно загружен из файлов
 		logger.Info("Starting HTTPS server with certificate files",
 			zap.String("address", cfg.ServerAddress),
 			zap.String("cert", cfg.TLSCertFile),
 			zap.String("key", cfg.TLSKeyFile),
 		)
-		cert, err := tls.LoadX509KeyPair(cfg.TLSCertFile, cfg.TLSKeyFile)
-		if err != nil {
-			return fmt.Errorf("failed to load TLS certificate: %w", err)
-		}
-		tlsConfig = &tls.Config{
-			Certificates: []tls.Certificate{cert},
-		}
-	} else {
-		// Генерируем самоподписанный сертификат на лету
-		logger.Info("Generating self-signed certificate for HTTPS",
-			zap.String("address", cfg.ServerAddress),
-			zap.Bool("cert_file_exists", certExists),
-			zap.Bool("key_file_exists", keyExists),
-		)
-		cert, err := generateSelfSignedCert()
-		if err != nil {
-			return fmt.Errorf("failed to generate self-signed certificate: %w", err)
-		}
-		tlsConfig = &tls.Config{
-			Certificates: []tls.Certificate{cert},
-		}
+	}
+
+	tlsConfig = &tls.Config{
+		Certificates: []tls.Certificate{cert},
 	}
 
 	// Создаем сервер с TLS конфигурацией и таймаутами
-	server := &http.Server{
+	return &http.Server{
 		Addr:         cfg.ServerAddress,
 		Handler:      handler,
 		TLSConfig:    tlsConfig,
 		ReadTimeout:  readTimeout,
 		WriteTimeout: writeTimeout,
 		IdleTimeout:  idleTimeout,
-	}
-
-	return runServerWithGracefulShutdown(server, logger, service, true)
+	}, nil
 }
 
-// runServerWithGracefulShutdown запускает сервер с обработкой сигналов завершения.
-func runServerWithGracefulShutdown(server *http.Server, logger *zap.Logger, service *app.Service, isTLS bool) error {
-	// Канал для перехвата сигналов завершения
-	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, syscall.SIGTERM, syscall.SIGINT, syscall.SIGQUIT)
-	// Важно: освобождаем ресурсы signal.Notify при завершении
-	defer signal.Stop(sigChan)
-
+// runServerWithGracefulShutdown запускает сервер с обработкой сигналов завершения через контекст.
+// Выполняет graceful shutdown: сначала завершает HTTP сервер, затем закрывает сервис и его зависимости.
+func runServerWithGracefulShutdown(ctx context.Context, server *http.Server, logger *zap.Logger, service *app.Service, isTLS bool) error {
 	// Канал для ошибок сервера
 	serverErrors := make(chan error, 1)
 
@@ -186,19 +181,25 @@ func runServerWithGracefulShutdown(server *http.Server, logger *zap.Logger, serv
 			// Используем пустые строки для cert и key, так как они уже в TLSConfig
 			err = server.ListenAndServeTLS("", "")
 		} else {
-			logger.Info("Starting HTTP server", zap.String("address", server.Addr))
+			logger.Info("HTTP server started", zap.String("address", server.Addr))
 			err = server.ListenAndServe()
 		}
-		serverErrors <- err
+		if err != nil && err != http.ErrServerClosed {
+			serverErrors <- err
+		}
 	}()
 
-	// Ожидаем сигнал завершения или ошибку запуска
+	// Ожидаем сигнал завершения через контекст или ошибку запуска
 	select {
-	case sig := <-sigChan:
-		logger.Info("Received shutdown signal", zap.String("signal", sig.String()))
-		return gracefulShutdown(server, logger, service)
+	case <-ctx.Done():
+		logger.Info("Received shutdown signal", zap.String("signal", ctx.Err().Error()))
+		return gracefulShutdown(ctx, server, logger, service)
 	case err := <-serverErrors:
-		if err != nil && err != http.ErrServerClosed {
+		if err != nil {
+			// Если сервер не запустился, закрываем сервис перед возвратом ошибки
+			if closeErr := service.Close(); closeErr != nil {
+				logger.Error("Error closing service after server start failure", zap.Error(closeErr))
+			}
 			return fmt.Errorf("failed to start server: %w", err)
 		}
 	}
@@ -206,24 +207,24 @@ func runServerWithGracefulShutdown(server *http.Server, logger *zap.Logger, serv
 	return nil
 }
 
-// gracefulShutdown выполняет плавное завершение работы сервера.
-// Ожидает завершения всех активных запросов и сохраняет данные в хранилище.
-func gracefulShutdown(server *http.Server, logger *zap.Logger, service *app.Service) error {
+// gracefulShutdown выполняет плавное завершение работы всех компонентов.
+// Порядок завершения: сначала HTTP сервер, затем сервис (который закроет storage и другие зависимости).
+func gracefulShutdown(ctx context.Context, server *http.Server, logger *zap.Logger, service *app.Service) error {
 	// Создаем контекст с таймаутом для завершения
-	ctx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
 	defer cancel()
 
 	logger.Info("Shutting down server gracefully...")
 
-	// Инициируем graceful shutdown сервера
-	if err := server.Shutdown(ctx); err != nil {
+	// Инициируем graceful shutdown сервера (завершаем обработку активных запросов)
+	if err := server.Shutdown(shutdownCtx); err != nil {
 		logger.Error("Error during server shutdown", zap.Error(err))
 		return fmt.Errorf("server shutdown failed: %w", err)
 	}
 
-	logger.Info("Server stopped, saving data...")
+	logger.Info("Server stopped, closing service...")
 
-	// Закрываем сервис и сохраняем все данные
+	// Закрываем сервис (который закроет storage и другие зависимости)
 	if err := service.Close(); err != nil {
 		logger.Error("Error closing service", zap.Error(err))
 		return fmt.Errorf("failed to close service: %w", err)
@@ -283,15 +284,6 @@ func generateSelfSignedCert() (tls.Certificate, error) {
 	}
 
 	return cert, nil
-}
-
-// fileExists проверяет существование файла.
-func fileExists(filename string) bool {
-	if filename == "" {
-		return false
-	}
-	_, err := os.Stat(filename)
-	return err == nil
 }
 
 // printBuildInfo выводит информацию о сборке приложения в stdout.
