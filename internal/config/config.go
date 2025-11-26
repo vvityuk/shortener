@@ -94,31 +94,51 @@ func NewConfig() (*Config, error) {
 	v.AutomaticEnv()
 
 	// Настраиваем флаги командной строки через pflag
-	// Используем pflag.CommandLine для совместимости со стандартным flag
-	pflag.CommandLine = pflag.NewFlagSet("shortener", pflag.ExitOnError)
-	pflag.StringP("config", "c", "", "path to JSON config file")
-	pflag.StringP("server-address", "a", "", "server address")
-	pflag.StringP("base-url", "b", "", "base URL")
-	pflag.StringP("file-storage-path", "f", "", "file storage path")
-	pflag.StringP("database-dsn", "d", "", "database DSN")
-	pflag.BoolP("enable-https", "s", false, "enable HTTPS")
-	pflag.String("cert", "", "TLS certificate file")
-	pflag.String("key", "", "TLS private key file")
+	// Создаем новый FlagSet для избежания конфликтов при повторных вызовах
+	flags := pflag.NewFlagSet("shortener", pflag.ContinueOnError)
+	configFlag := flags.StringP("config", "c", "", "path to JSON config file")
+	serverAddressFlag := flags.StringP("server-address", "a", "", "server address")
+	baseURLFlag := flags.StringP("base-url", "b", "", "base URL")
+	fileStoragePathFlag := flags.StringP("file-storage-path", "f", "", "file storage path")
+	databaseDSNFlag := flags.StringP("database-dsn", "d", "", "database DSN")
+	enableHTTPSFlag := flags.BoolP("enable-https", "s", false, "enable HTTPS")
+	certFlag := flags.String("cert", "", "TLS certificate file")
+	keyFlag := flags.String("key", "", "TLS private key file")
 
 	// Парсим флаги из командной строки
-	pflag.Parse()
+	if err := flags.Parse(os.Args[1:]); err != nil {
+		if err == pflag.ErrHelp {
+			os.Exit(0)
+		}
+		return nil, fmt.Errorf("failed to parse flags: %w", err)
+	}
 
-	// Привязываем флаги к Viper
-	// Viper автоматически преобразует дефисы в подчеркивания
-	if err := v.BindPFlags(pflag.CommandLine); err != nil {
-		return nil, fmt.Errorf("failed to bind flags: %w", err)
+	// Устанавливаем значения из флагов в Viper (если флаги были установлены)
+	// Используем Changed() чтобы применять только установленные флаги
+	if flags.Changed("server-address") {
+		v.Set("server_address", *serverAddressFlag)
+	}
+	if flags.Changed("base-url") {
+		v.Set("base_url", *baseURLFlag)
+	}
+	if flags.Changed("file-storage-path") {
+		v.Set("file_storage_path", *fileStoragePathFlag)
+	}
+	if flags.Changed("database-dsn") {
+		v.Set("database_dsn", *databaseDSNFlag)
+	}
+	if flags.Changed("enable-https") {
+		v.Set("enable_https", *enableHTTPSFlag)
+	}
+	if flags.Changed("cert") {
+		v.Set("tls_cert_file", *certFlag)
+	}
+	if flags.Changed("key") {
+		v.Set("tls_key_file", *keyFlag)
 	}
 
 	// Определяем путь к конфигурационному файлу (приоритет: флаг > переменная окружения)
-	configPath := v.GetString("config")
-	if configPath == "" {
-		configPath = v.GetString("c")
-	}
+	configPath := *configFlag
 	if configPath == "" {
 		configPath = os.Getenv("CONFIG")
 	}
