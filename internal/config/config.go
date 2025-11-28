@@ -2,32 +2,44 @@
 package config
 
 import (
-	"flag"
 	"fmt"
 	"os"
+	"strings"
+
+	"github.com/spf13/pflag"
+	"github.com/spf13/viper"
 )
 
 // Config содержит конфигурацию приложения.
 // Значения могут быть установлены через флаги командной строки или переменные окружения.
 type Config struct {
 	// ServerAddress адрес и порт для запуска HTTP-сервера (например, "localhost:8080")
-	ServerAddress string
+	ServerAddress string `mapstructure:"server_address"`
 
 	// BaseURL базовый URL для генерации коротких ссылок (например, "http://localhost:8080")
-	BaseURL string
+	BaseURL string `mapstructure:"base_url"`
 
 	// FileStoragePath путь к файлу для хранения данных (например, "urls.json")
 	// Если пусто, используется хранилище в памяти
-	FileStoragePath string
+	FileStoragePath string `mapstructure:"file_storage_path"`
 
 	// DatabaseDSN строка подключения к PostgreSQL (например, "postgres://user:pass@localhost/dbname")
 	// Если указана, имеет приоритет над файловым хранилищем
-	DatabaseDSN string
+	DatabaseDSN string `mapstructure:"database_dsn"`
+
+	// EnableHTTPS включает HTTPS режим работы сервера
+	EnableHTTPS bool `mapstructure:"enable_https"`
+
+	// TLSCertFile путь к файлу сертификата TLS (например, "server.crt")
+	TLSCertFile string `mapstructure:"tls_cert_file"`
+
+	// TLSKeyFile путь к файлу приватного ключа TLS (например, "server.key")
+	TLSKeyFile string `mapstructure:"tls_key_file"`
 }
 
 // NewConfig создает новую конфигурацию приложения.
-// Читает параметры из флагов командной строки и переменных окружения.
-// Переменные окружения имеют приоритет над флагами.
+// Читает параметры из JSON файла, флагов командной строки и переменных окружения.
+// Приоритет: переменные окружения > флаги > JSON файл > значения по умолчанию.
 //
 // Флаги командной строки:
 //
@@ -35,50 +47,156 @@ type Config struct {
 //	-b: базовый URL (по умолчанию "http://localhost:8080")
 //	-f: путь к файлу хранилища (по умолчанию "urls.json")
 //	-d: строка подключения к БД (по умолчанию пусто)
+//	-s: включить HTTPS режим
+//	-c, -config: путь к JSON файлу конфигурации
+//	-cert: путь к файлу сертификата TLS (по умолчанию пусто, если не указан - генерируется автоматически)
+//	-key: путь к файлу приватного ключа TLS (по умолчанию пусто, если не указан - генерируется автоматически)
 //
 // Переменные окружения:
 //
+//	CONFIG: путь к JSON файлу конфигурации
 //	SERVER_ADDRESS: адрес сервера
 //	BASE_URL: базовый URL
 //	FILE_STORAGE_PATH: путь к файлу хранилища
 //	DATABASE_DSN: строка подключения к БД
+//	ENABLE_HTTPS: включить HTTPS (значение "true" или "1")
+//	TLS_CERT_FILE: путь к файлу сертификата TLS (если не указан, генерируется автоматически)
+//	TLS_KEY_FILE: путь к файлу приватного ключа TLS (если не указан, генерируется автоматически)
+//
+// Формат JSON файла конфигурации:
+//
+//	{
+//	    "server_address": "localhost:8080",
+//	    "base_url": "http://localhost:8080",
+//	    "file_storage_path": "urls.json",
+//	    "database_dsn": "",
+//	    "enable_https": false,
+//	    "tls_cert_file": "",
+//	    "tls_key_file": ""
+//	}
 //
 // Возвращает конфигурацию приложения или ошибку валидации конфигурации.
 func NewConfig() (*Config, error) {
-	cfg := &Config{}
+	v := viper.New()
 
-	// Флаги
-	serverAddress := flag.String("a", "localhost:8080", "server address")
-	baseURL := flag.String("b", "http://localhost:8080", "base URL")
-	fileStoragePath := flag.String("f", "urls.json", "file storage path")
-	databaseDSN := flag.String("d", "", "database DSN")
+	// Устанавливаем значения по умолчанию
+	v.SetDefault("server_address", "localhost:8080")
+	v.SetDefault("base_url", "http://localhost:8080")
+	v.SetDefault("file_storage_path", "urls.json")
+	v.SetDefault("database_dsn", "")
+	v.SetDefault("enable_https", false)
+	v.SetDefault("tls_cert_file", "")
+	v.SetDefault("tls_key_file", "")
 
-	flag.Parse()
+	// Настраиваем чтение переменных окружения
+	// Viper автоматически преобразует UPPER_CASE в lowercase с подчеркиваниями
+	v.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
+	v.AutomaticEnv()
 
-	// Переменные окружения
-	if envServerAddress := os.Getenv("SERVER_ADDRESS"); envServerAddress != "" {
-		*serverAddress = envServerAddress
+	// Настраиваем флаги командной строки через pflag
+	// Создаем новый FlagSet для избежания конфликтов при повторных вызовах
+	flags := pflag.NewFlagSet("shortener", pflag.ContinueOnError)
+	configFlag := flags.StringP("config", "c", "", "path to JSON config file")
+	serverAddressFlag := flags.StringP("server-address", "a", "", "server address")
+	baseURLFlag := flags.StringP("base-url", "b", "", "base URL")
+	fileStoragePathFlag := flags.StringP("file-storage-path", "f", "", "file storage path")
+	databaseDSNFlag := flags.StringP("database-dsn", "d", "", "database DSN")
+	enableHTTPSFlag := flags.BoolP("enable-https", "s", false, "enable HTTPS")
+	certFlag := flags.String("cert", "", "TLS certificate file")
+	keyFlag := flags.String("key", "", "TLS private key file")
+
+	// Парсим флаги из командной строки
+	if err := flags.Parse(os.Args[1:]); err != nil {
+		if err == pflag.ErrHelp {
+			os.Exit(0)
+		}
+		return nil, fmt.Errorf("failed to parse flags: %w", err)
 	}
-	if envBaseURL := os.Getenv("BASE_URL"); envBaseURL != "" {
-		*baseURL = envBaseURL
+
+	// Устанавливаем значения из флагов в Viper (если флаги были установлены)
+	// Используем Changed() чтобы применять только установленные флаги
+	if flags.Changed("server-address") {
+		v.Set("server_address", *serverAddressFlag)
 	}
-	if envFileStoragePath := os.Getenv("FILE_STORAGE_PATH"); envFileStoragePath != "" {
-		*fileStoragePath = envFileStoragePath
+	if flags.Changed("base-url") {
+		v.Set("base_url", *baseURLFlag)
 	}
-	if envDatabaseDSN := os.Getenv("DATABASE_DSN"); envDatabaseDSN != "" {
-		*databaseDSN = envDatabaseDSN
+	if flags.Changed("file-storage-path") {
+		v.Set("file_storage_path", *fileStoragePathFlag)
+	}
+	if flags.Changed("database-dsn") {
+		v.Set("database_dsn", *databaseDSNFlag)
+	}
+	if flags.Changed("enable-https") {
+		v.Set("enable_https", *enableHTTPSFlag)
+	}
+	if flags.Changed("cert") {
+		v.Set("tls_cert_file", *certFlag)
+	}
+	if flags.Changed("key") {
+		v.Set("tls_key_file", *keyFlag)
 	}
 
-	cfg.ServerAddress = *serverAddress
-	cfg.BaseURL = *baseURL
-	cfg.FileStoragePath = *fileStoragePath
-	cfg.DatabaseDSN = *databaseDSN
+	// Определяем путь к конфигурационному файлу (приоритет: флаг > переменная окружения)
+	configPath := *configFlag
+	if configPath == "" {
+		configPath = os.Getenv("CONFIG")
+	}
 
+	// Загружаем конфигурацию из JSON файла (если указан)
+	if configPath != "" {
+		v.SetConfigFile(configPath)
+		v.SetConfigType("json")
+		if err := v.ReadInConfig(); err != nil {
+			return nil, fmt.Errorf("failed to load config file %s: %w", configPath, err)
+		}
+	}
+
+	// Применяем переменные окружения с наивысшим приоритетом
+	// Viper по умолчанию имеет приоритет: flags > env > config > defaults
+	// Нам нужен: env > flags > config > defaults
+	// Поэтому после чтения всех источников, вручную проверяем env и устанавливаем через Set()
+	applyEnvOverrides(v)
+
+	// Unmarshal конфигурации в структуру
+	var cfg Config
+	if err := v.Unmarshal(&cfg); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal config: %w", err)
+	}
+
+	// Валидация конфигурации
 	if err := cfg.validate(); err != nil {
 		return nil, fmt.Errorf("invalid config: %w", err)
 	}
 
-	return cfg, nil
+	return &cfg, nil
+}
+
+// applyEnvOverrides применяет переменные окружения с наивысшим приоритетом.
+// Это необходимо, т.к. Viper по умолчанию имеет приоритет flags > env > config > defaults,
+// а нам нужен env > flags > config > defaults.
+func applyEnvOverrides(v *viper.Viper) {
+	// Используем os.Getenv напрямую для проверки наличия переменных окружения
+	// и устанавливаем их через Set() для наивысшего приоритета
+	envVars := map[string]string{
+		"SERVER_ADDRESS":    "server_address",
+		"BASE_URL":          "base_url",
+		"FILE_STORAGE_PATH": "file_storage_path",
+		"DATABASE_DSN":      "database_dsn",
+		"TLS_CERT_FILE":     "tls_cert_file",
+		"TLS_KEY_FILE":      "tls_key_file",
+	}
+
+	for envKey, viperKey := range envVars {
+		if val := os.Getenv(envKey); val != "" {
+			v.Set(viperKey, val)
+		}
+	}
+
+	// Специальная обработка для bool переменной
+	if val := os.Getenv("ENABLE_HTTPS"); val != "" {
+		v.Set("enable_https", val == "true" || val == "1")
+	}
 }
 
 func (cfg *Config) validate() error {
@@ -88,5 +206,7 @@ func (cfg *Config) validate() error {
 	if cfg.BaseURL == "" {
 		return fmt.Errorf("base URL is required")
 	}
+	// Файлы сертификатов не обязательны - если они не указаны или не существуют,
+	// будет сгенерирован самоподписанный сертификат автоматически
 	return nil
 }
