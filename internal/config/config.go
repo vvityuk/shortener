@@ -195,8 +195,8 @@ func NewConfig() (*Config, error) {
 // Это необходимо, т.к. Viper по умолчанию имеет приоритет flags > env > config > defaults,
 // а нам нужен env > flags > config > defaults.
 func applyEnvOverrides(v *viper.Viper) {
-	// Используем os.Getenv напрямую для проверки наличия переменных окружения
-	// и устанавливаем их через Set() для наивысшего приоритета
+	// Используем os.LookupEnv для проверки наличия переменных окружения
+	// (отличает пустую переменную от необъявленной) и устанавливаем их через Set() для наивысшего приоритета
 	envVars := map[string]string{
 		"SERVER_ADDRESS":    "server_address",
 		"BASE_URL":          "base_url",
@@ -209,13 +209,13 @@ func applyEnvOverrides(v *viper.Viper) {
 	}
 
 	for envKey, viperKey := range envVars {
-		if val := os.Getenv(envKey); val != "" {
+		if val, ok := os.LookupEnv(envKey); ok {
 			v.Set(viperKey, val)
 		}
 	}
 
 	// Специальная обработка для bool переменной
-	if val := os.Getenv("ENABLE_HTTPS"); val != "" {
+	if val, ok := os.LookupEnv("ENABLE_HTTPS"); ok {
 		v.Set("enable_https", val == "true" || val == "1")
 	}
 }
