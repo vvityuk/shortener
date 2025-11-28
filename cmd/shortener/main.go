@@ -21,7 +21,11 @@ import (
 	"github.com/vvityuk/shortener/internal/app"
 	"github.com/vvityuk/shortener/internal/app/middleware"
 	"github.com/vvityuk/shortener/internal/config"
+	grpcserver "github.com/vvityuk/shortener/internal/grpc"
+	"github.com/vvityuk/shortener/internal/grpc/interceptors"
+	pb "github.com/vvityuk/shortener/pkg/grpc/pb"
 	"go.uber.org/zap"
+	"google.golang.org/grpc"
 )
 
 // Константы таймаутов для HTTP сервера.
@@ -101,7 +105,7 @@ func run() error {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT, syscall.SIGQUIT)
 	defer stop()
 
-	// Запуск сервера с поддержкой graceful shutdown
+	// Запуск HTTP сервера с поддержкой graceful shutdown
 	var server *http.Server
 	if cfg.EnableHTTPS {
 		server, err = createHTTPSServer(cfg, r, logger)
@@ -112,7 +116,13 @@ func run() error {
 		server = createHTTPServer(cfg, r)
 	}
 
-	return runServerWithGracefulShutdown(ctx, server, logger, service, cfg.EnableHTTPS)
+	// Создаем и запускаем gRPC сервер
+	grpcServer, err := createGRPCServer(cfg, service, logger)
+	if err != nil {
+		return fmt.Errorf("failed to create gRPC server: %w", err)
+	}
+
+	return runServersWithGracefulShutdown(ctx, server, grpcServer, logger, service, cfg.EnableHTTPS, cfg.GRPCAddress)
 }
 
 // createHTTPServer создает HTTP сервер.
@@ -170,25 +180,53 @@ func createHTTPSServer(cfg *config.Config, handler http.Handler, logger *zap.Log
 	}, nil
 }
 
-// runServerWithGracefulShutdown запускает сервер с обработкой сигналов завершения через контекст.
-// Выполняет graceful shutdown: сначала завершает HTTP сервер, затем закрывает сервис и его зависимости.
-func runServerWithGracefulShutdown(ctx context.Context, server *http.Server, logger *zap.Logger, service *app.Service, isTLS bool) error {
-	// Канал для ошибок сервера
-	serverErrors := make(chan error, 1)
+// createGRPCServer создает и настраивает gRPC сервер с interceptors.
+func createGRPCServer(cfg *config.Config, service *app.Service, logger *zap.Logger) (*grpc.Server, error) {
+	// Создаем gRPC сервер с interceptors
+	grpcServer := grpc.NewServer(
+		grpc.UnaryInterceptor(interceptors.AuthInterceptor()),
+	)
 
-	// Запускаем сервер в горутине
+	// Регистрируем сервис
+	grpcService := grpcserver.NewServer(service)
+	pb.RegisterShortenerServiceServer(grpcServer, grpcService)
+
+	return grpcServer, nil
+}
+
+// runServersWithGracefulShutdown запускает HTTP и gRPC серверы с обработкой сигналов завершения через контекст.
+// Выполняет graceful shutdown: сначала завершает HTTP и gRPC серверы, затем закрывает сервис и его зависимости.
+func runServersWithGracefulShutdown(ctx context.Context, httpServer *http.Server, grpcServer *grpc.Server, logger *zap.Logger, service *app.Service, isTLS bool, grpcAddress string) error {
+	// Канал для ошибок серверов
+	serverErrors := make(chan error, 2)
+
+	// Запускаем HTTP сервер в горутине
 	go func() {
 		var err error
 		if isTLS {
-			logger.Info("HTTPS server started", zap.String("address", server.Addr))
+			logger.Info("HTTPS server started", zap.String("address", httpServer.Addr))
 			// Используем пустые строки для cert и key, так как они уже в TLSConfig
-			err = server.ListenAndServeTLS("", "")
+			err = httpServer.ListenAndServeTLS("", "")
 		} else {
-			logger.Info("HTTP server started", zap.String("address", server.Addr))
-			err = server.ListenAndServe()
+			logger.Info("HTTP server started", zap.String("address", httpServer.Addr))
+			err = httpServer.ListenAndServe()
 		}
 		if err != nil && err != http.ErrServerClosed {
-			serverErrors <- err
+			serverErrors <- fmt.Errorf("HTTP server error: %w", err)
+		}
+	}()
+
+	// Запускаем gRPC сервер в горутине
+	go func() {
+		listener, err := net.Listen("tcp", grpcAddress)
+		if err != nil {
+			serverErrors <- fmt.Errorf("failed to create gRPC listener: %w", err)
+			return
+		}
+
+		logger.Info("gRPC server started", zap.String("address", grpcAddress))
+		if err := grpcServer.Serve(listener); err != nil {
+			serverErrors <- fmt.Errorf("gRPC server error: %w", err)
 		}
 	}()
 
@@ -196,7 +234,7 @@ func runServerWithGracefulShutdown(ctx context.Context, server *http.Server, log
 	select {
 	case <-ctx.Done():
 		logger.Info("Received shutdown signal", zap.String("signal", ctx.Err().Error()))
-		return gracefulShutdown(ctx, server, logger, service)
+		return gracefulShutdown(ctx, httpServer, grpcServer, logger, service)
 	case err := <-serverErrors:
 		if err != nil {
 			// Если сервер не запустился, закрываем сервис перед возвратом ошибки
@@ -211,21 +249,24 @@ func runServerWithGracefulShutdown(ctx context.Context, server *http.Server, log
 }
 
 // gracefulShutdown выполняет плавное завершение работы всех компонентов.
-// Порядок завершения: сначала HTTP сервер, затем сервис (который закроет storage и другие зависимости).
-func gracefulShutdown(ctx context.Context, server *http.Server, logger *zap.Logger, service *app.Service) error {
+// Порядок завершения: сначала HTTP и gRPC серверы, затем сервис (который закроет storage и другие зависимости).
+func gracefulShutdown(ctx context.Context, httpServer *http.Server, grpcServer *grpc.Server, logger *zap.Logger, service *app.Service) error {
 	// Создаем контекст с таймаутом для завершения
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
 	defer cancel()
 
-	logger.Info("Shutting down server gracefully...")
+	logger.Info("Shutting down servers gracefully...")
 
-	// Инициируем graceful shutdown сервера (завершаем обработку активных запросов)
-	if err := server.Shutdown(shutdownCtx); err != nil {
-		logger.Error("Error during server shutdown", zap.Error(err))
-		return fmt.Errorf("server shutdown failed: %w", err)
+	// Инициируем graceful shutdown HTTP сервера (завершаем обработку активных запросов)
+	if err := httpServer.Shutdown(shutdownCtx); err != nil {
+		logger.Error("Error during HTTP server shutdown", zap.Error(err))
+		return fmt.Errorf("HTTP server shutdown failed: %w", err)
 	}
+	logger.Info("HTTP server stopped")
 
-	logger.Info("Server stopped, closing service...")
+	// Останавливаем gRPC сервер
+	grpcServer.GracefulStop()
+	logger.Info("gRPC server stopped")
 
 	// Закрываем сервис (который закроет storage и другие зависимости)
 	if err := service.Close(); err != nil {

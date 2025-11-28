@@ -39,6 +39,9 @@ type Config struct {
 	// TrustedSubnet строковое представление доверенной подсети в формате CIDR (например, "192.168.0.0/24")
 	// Используется для проверки доступа к internal эндпоинтам
 	TrustedSubnet string `mapstructure:"trusted_subnet"`
+
+	// GRPCAddress адрес и порт для запуска grpc-сервера (например, "localhost:3200")
+	GRPCAddress string `mapstructure:"grpc_address"`
 }
 
 // NewConfig создает новую конфигурацию приложения.
@@ -77,7 +80,8 @@ type Config struct {
 //	    "enable_https": false,
 //	    "tls_cert_file": "",
 //	    "tls_key_file": "",
-//		"trusted_subnet": ""
+//		"trusted_subnet": "",
+//		"grpc_address": ""
 //	}
 //
 // Возвращает конфигурацию приложения или ошибку валидации конфигурации.
@@ -93,6 +97,7 @@ func NewConfig() (*Config, error) {
 	v.SetDefault("tls_cert_file", "")
 	v.SetDefault("tls_key_file", "")
 	v.SetDefault("trusted_subnet", "")
+	v.SetDefault("grpc_address", "localhost:3200")
 
 	// Настраиваем чтение переменных окружения
 	// Viper автоматически преобразует UPPER_CASE в lowercase с подчеркиваниями
@@ -111,6 +116,7 @@ func NewConfig() (*Config, error) {
 	certFlag := flags.String("cert", "", "TLS certificate file")
 	keyFlag := flags.String("key", "", "TLS private key file")
 	keyTrustedSubnet := flags.String("t", "", "trusted subnet in CIDR notation")
+	grpcAddressFlag := flags.String("g", "", "trusted subnet in CIDR notation")
 
 	// Парсим флаги из командной строки
 	if err := flags.Parse(os.Args[1:]); err != nil {
@@ -145,6 +151,9 @@ func NewConfig() (*Config, error) {
 	}
 	if flags.Changed("t") {
 		v.Set("trusted_subnet", *keyTrustedSubnet)
+	}
+	if flags.Changed("g") {
+		v.Set("grpc_address", *grpcAddressFlag)
 	}
 
 	// Определяем путь к конфигурационному файлу (приоритет: флаг > переменная окружения)
@@ -196,6 +205,7 @@ func applyEnvOverrides(v *viper.Viper) {
 		"TLS_CERT_FILE":     "tls_cert_file",
 		"TLS_KEY_FILE":      "tls_key_file",
 		"TRUSTED_SUBNET":    "trusted_subnet",
+		"GRPC_ADDRESS":      "grpc_address",
 	}
 
 	for envKey, viperKey := range envVars {
