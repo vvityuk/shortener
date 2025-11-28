@@ -18,6 +18,7 @@ type Storage interface {
 	Close() error
 	Ping(ctx context.Context) error
 	BatchDelete(shortURLs []string, userID string) error
+	GetStats() (urlsCount int, usersCount int, error error)
 }
 
 // FileStorage реализует хранилище на основе JSON-файла.
@@ -177,6 +178,20 @@ func (s *FileStorage) BatchDelete(shortURLs []string, userID string) error {
 	return nil
 }
 
+// GetStats возвращает статистику: количество сокращённых URL и количество пользователей.
+func (s *FileStorage) GetStats() (int, int, error) {
+	urlsCount := len(s.urls)
+
+	// Подсчитываем уникальных пользователей
+	users := make(map[string]struct{})
+	for _, data := range s.urls {
+		users[data.UserID] = struct{}{}
+	}
+	usersCount := len(users)
+
+	return urlsCount, usersCount, nil
+}
+
 // MemoryStorage реализует хранилище в оперативной памяти.
 // Данные не сохраняются между перезапусками приложения.
 type MemoryStorage struct {
@@ -288,4 +303,18 @@ func (s *MemoryStorage) Ping(ctx context.Context) error {
 // Для MemoryStorage реализация отсутствует, всегда возвращает nil.
 func (s *MemoryStorage) BatchDelete(shortURLs []string, userID string) error {
 	return nil
+}
+
+// GetStats возвращает статистику: количество сокращённых URL и количество пользователей.
+func (s *MemoryStorage) GetStats() (int, int, error) {
+	urlsCount := len(s.urls)
+
+	// Подсчитываем уникальных пользователей
+	users := make(map[string]struct{})
+	for _, data := range s.urls {
+		users[data.UserID] = struct{}{}
+	}
+	usersCount := len(users)
+
+	return urlsCount, usersCount, nil
 }

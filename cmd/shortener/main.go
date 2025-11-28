@@ -94,6 +94,9 @@ func run() error {
 	r.Get("/api/user/urls", handler.GetUserURLs)
 	r.Delete("/api/user/urls", handler.DeleteUserURLs)
 
+	// Internal эндпоинты с проверкой доверенной подсети
+	r.With(middleware.TrustedSubnetMiddleware(cfg.TrustedSubnet)).Get("/api/internal/stats", handler.InternalStats)
+
 	// Создаем контекст для graceful shutdown
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT, syscall.SIGQUIT)
 	defer stop()

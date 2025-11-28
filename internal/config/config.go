@@ -35,6 +35,10 @@ type Config struct {
 
 	// TLSKeyFile путь к файлу приватного ключа TLS (например, "server.key")
 	TLSKeyFile string `mapstructure:"tls_key_file"`
+
+	// TrustedSubnet строковое представление доверенной подсети в формате CIDR (например, "192.168.0.0/24")
+	// Используется для проверки доступа к internal эндпоинтам
+	TrustedSubnet string `mapstructure:"trusted_subnet"`
 }
 
 // NewConfig создает новую конфигурацию приложения.
@@ -72,7 +76,8 @@ type Config struct {
 //	    "database_dsn": "",
 //	    "enable_https": false,
 //	    "tls_cert_file": "",
-//	    "tls_key_file": ""
+//	    "tls_key_file": "",
+//		"trusted_subnet": ""
 //	}
 //
 // Возвращает конфигурацию приложения или ошибку валидации конфигурации.
@@ -87,6 +92,7 @@ func NewConfig() (*Config, error) {
 	v.SetDefault("enable_https", false)
 	v.SetDefault("tls_cert_file", "")
 	v.SetDefault("tls_key_file", "")
+	v.SetDefault("trusted_subnet", "")
 
 	// Настраиваем чтение переменных окружения
 	// Viper автоматически преобразует UPPER_CASE в lowercase с подчеркиваниями
@@ -104,6 +110,7 @@ func NewConfig() (*Config, error) {
 	enableHTTPSFlag := flags.BoolP("enable-https", "s", false, "enable HTTPS")
 	certFlag := flags.String("cert", "", "TLS certificate file")
 	keyFlag := flags.String("key", "", "TLS private key file")
+	keyTrustedSubnet := flags.String("t", "", "trusted subnet in CIDR notation")
 
 	// Парсим флаги из командной строки
 	if err := flags.Parse(os.Args[1:]); err != nil {
@@ -135,6 +142,9 @@ func NewConfig() (*Config, error) {
 	}
 	if flags.Changed("key") {
 		v.Set("tls_key_file", *keyFlag)
+	}
+	if flags.Changed("t") {
+		v.Set("trusted_subnet", *keyTrustedSubnet)
 	}
 
 	// Определяем путь к конфигурационному файлу (приоритет: флаг > переменная окружения)
@@ -185,6 +195,7 @@ func applyEnvOverrides(v *viper.Viper) {
 		"DATABASE_DSN":      "database_dsn",
 		"TLS_CERT_FILE":     "tls_cert_file",
 		"TLS_KEY_FILE":      "tls_key_file",
+		"TRUSTED_SUBNET":    "trusted_subnet",
 	}
 
 	for envKey, viperKey := range envVars {

@@ -39,6 +39,11 @@ type userURLResponse struct {
 	OriginalURL string `json:"original_url"`
 }
 
+type statsResponse struct {
+	URLs  int `json:"urls"`
+	Users int `json:"users"`
+}
+
 // NewHandler создает новый экземпляр Handler с указанным сервисом.
 // Возвращает обработчик HTTP-запросов для работы с короткими URL.
 func NewHandler(service *Service) *Handler {
@@ -279,4 +284,26 @@ func (h *Handler) DeleteUserURLs(w http.ResponseWriter, r *http.Request) {
 
 	h.service.BatchDelete(shortURLs, userID)
 	w.WriteHeader(http.StatusAccepted)
+}
+
+// InternalStats возвращает статистику сервиса: количество сокращённых URL и количество пользователей.
+// Доступ к эндпоинту должен быть ограничен проверкой доверенной подсети через middleware.
+func (h *Handler) InternalStats(w http.ResponseWriter, r *http.Request) {
+	urlsCount, usersCount, err := h.service.GetStats()
+	if err != nil {
+		http.Error(w, "Failed to get stats", http.StatusInternalServerError)
+		return
+	}
+
+	resp := statsResponse{
+		URLs:  urlsCount,
+		Users: usersCount,
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	if err := json.NewEncoder(w).Encode(resp); err != nil {
+		http.Error(w, "Failed to encode response", http.StatusInternalServerError)
+		return
+	}
 }
