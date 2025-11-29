@@ -26,6 +26,7 @@ import (
 	pb "github.com/vvityuk/shortener/pkg/grpc/pb"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
 )
 
 // Константы таймаутов для HTTP сервера.
@@ -117,12 +118,21 @@ func run() error {
 	}
 
 	// Создаем и запускаем gRPC сервер
-	grpcServer, err := createGRPCServer(cfg, service, logger)
+	grpcServer, grpcTLSConfig, err := createGRPCServer(cfg, service, logger)
 	if err != nil {
 		return fmt.Errorf("failed to create gRPC server: %w", err)
 	}
 
-	return runServersWithGracefulShutdown(ctx, server, grpcServer, logger, service, cfg.EnableHTTPS, cfg.GRPCAddress)
+	return runServersWithGracefulShutdown(ServerShutdownConfig{
+		Context:       ctx,
+		HTTPServer:    server,
+		GRPCServer:    grpcServer,
+		Logger:        logger,
+		Service:       service,
+		IsTLS:         cfg.EnableHTTPS,
+		GRPCAddress:   cfg.GRPCAddress,
+		GRPCTLSConfig: grpcTLSConfig,
+	})
 }
 
 // createHTTPServer создает HTTP сервер.
@@ -136,35 +146,38 @@ func createHTTPServer(cfg *config.Config, handler http.Handler) *http.Server {
 	}
 }
 
-// createHTTPSServer создает HTTPS сервер с автоматической генерацией сертификата при необходимости.
-func createHTTPSServer(cfg *config.Config, handler http.Handler, logger *zap.Logger) (*http.Server, error) {
-	var cert tls.Certificate
-	var err error
-
+// loadOrGenerateTLSCert загружает TLS сертификат из файлов или генерирует самоподписанный.
+func loadOrGenerateTLSCert(certFile, keyFile string, logger *zap.Logger, serverType string) (tls.Certificate, error) {
 	// Проверяем существование файлов сертификата
-	certFileExists := cfg.TLSCertFile != "" && fileExists(cfg.TLSCertFile)
-	keyFileExists := cfg.TLSKeyFile != "" && fileExists(cfg.TLSKeyFile)
+	certFileExists := certFile != "" && fileExists(certFile)
+	keyFileExists := keyFile != "" && fileExists(keyFile)
 
 	if certFileExists && keyFileExists {
 		// Пытаемся загрузить сертификат из файлов
-		cert, err = tls.LoadX509KeyPair(cfg.TLSCertFile, cfg.TLSKeyFile)
+		cert, err := tls.LoadX509KeyPair(certFile, keyFile)
 		if err != nil {
-			return nil, fmt.Errorf("failed to load TLS certificate: %w", err)
+			return tls.Certificate{}, fmt.Errorf("failed to load TLS certificate: %w", err)
 		}
-		logger.Info("Starting HTTPS server with certificate files",
-			zap.String("address", cfg.ServerAddress),
-			zap.String("cert", cfg.TLSCertFile),
-			zap.String("key", cfg.TLSKeyFile),
+		logger.Info("Loading TLS certificate from files",
+			zap.String("server_type", serverType),
+			zap.String("cert", certFile),
+			zap.String("key", keyFile),
 		)
-	} else {
-		// Если файлы не существуют, генерируем самоподписанный сертификат
-		logger.Info("Certificate files not found, generating self-signed certificate for HTTPS",
-			zap.String("address", cfg.ServerAddress),
-		)
-		cert, err = generateSelfSignedCert()
-		if err != nil {
-			return nil, fmt.Errorf("failed to generate self-signed certificate: %w", err)
-		}
+		return cert, nil
+	}
+
+	// Если файлы не существуют, генерируем самоподписанный сертификат
+	logger.Info("Certificate files not found, generating self-signed certificate",
+		zap.String("server_type", serverType),
+	)
+	return generateSelfSignedCert()
+}
+
+// createHTTPSServer создает HTTPS сервер с автоматической генерацией сертификата при необходимости.
+func createHTTPSServer(cfg *config.Config, handler http.Handler, logger *zap.Logger) (*http.Server, error) {
+	cert, err := loadOrGenerateTLSCert(cfg.TLSCertFile, cfg.TLSKeyFile, logger, "HTTPS")
+	if err != nil {
+		return nil, fmt.Errorf("failed to get TLS certificate: %w", err)
 	}
 
 	tlsConfig := &tls.Config{
@@ -188,43 +201,88 @@ func fileExists(filename string) bool {
 	return !os.IsNotExist(err)
 }
 
-// createGRPCServer создает и настраивает gRPC сервер с interceptors.
-func createGRPCServer(cfg *config.Config, service *app.Service, logger *zap.Logger) (*grpc.Server, error) {
-	// Создаем gRPC сервер с interceptors
-	grpcServer := grpc.NewServer(
-		grpc.UnaryInterceptor(interceptors.AuthInterceptor()),
-	)
+// createGRPCServer создает и настраивает gRPC сервер с interceptors и поддержкой TLS.
+func createGRPCServer(cfg *config.Config, service *app.Service, logger *zap.Logger) (*grpc.Server, *tls.Config, error) {
+	var opts []grpc.ServerOption
+
+	// Добавляем interceptor
+	opts = append(opts, grpc.UnaryInterceptor(interceptors.AuthInterceptor()))
+
+	// Настраиваем TLS, если включен HTTPS
+	var tlsConfig *tls.Config
+	if cfg.EnableHTTPS {
+		cert, err := loadOrGenerateTLSCert(cfg.TLSCertFile, cfg.TLSKeyFile, logger, "gRPC")
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to get TLS certificate for gRPC: %w", err)
+		}
+
+		tlsConfig = &tls.Config{
+			Certificates: []tls.Certificate{cert},
+		}
+
+		creds := credentials.NewTLS(tlsConfig)
+		opts = append(opts, grpc.Creds(creds))
+		logger.Info("gRPC server configured with TLS", zap.String("address", cfg.GRPCAddress))
+	} else {
+		logger.Info("gRPC server configured without TLS", zap.String("address", cfg.GRPCAddress))
+	}
+
+	// Создаем gRPC сервер с опциями
+	grpcServer := grpc.NewServer(opts...)
 
 	// Регистрируем сервис
 	grpcService := grpcserver.NewServer(service)
 	pb.RegisterShortenerServiceServer(grpcServer, grpcService)
 
-	logger.Info("gRPC server configured", zap.String("address", cfg.GRPCAddress))
-	return grpcServer, nil
+	return grpcServer, tlsConfig, nil
+}
+
+// ServerShutdownConfig содержит конфигурацию для graceful shutdown серверов.
+type ServerShutdownConfig struct {
+	Context       context.Context
+	HTTPServer    *http.Server
+	GRPCServer    *grpc.Server
+	Logger        *zap.Logger
+	Service       *app.Service
+	IsTLS         bool
+	GRPCAddress   string
+	GRPCTLSConfig *tls.Config
 }
 
 // runServersWithGracefulShutdown запускает HTTP и gRPC серверы с обработкой сигналов завершения через контекст.
 // Выполняет graceful shutdown: сначала завершает HTTP и gRPC серверы, затем закрывает сервис и его зависимости.
-func runServersWithGracefulShutdown(ctx context.Context, httpServer *http.Server, grpcServer *grpc.Server, logger *zap.Logger, service *app.Service, isTLS bool, grpcAddress string) error {
+func runServersWithGracefulShutdown(cfg ServerShutdownConfig) error {
 	// Канал для ошибок серверов
 	serverErrors := make(chan error, 2)
 
 	// Создаем listener для gRPC сервера заранее, чтобы проверить ошибки до запуска
-	grpcListener, err := net.Listen("tcp", grpcAddress)
-	if err != nil {
-		return fmt.Errorf("failed to create gRPC listener: %w", err)
+	var grpcListener net.Listener
+	if cfg.GRPCTLSConfig != nil {
+		// Создаем TLS listener для gRPC
+		rawListener, err := net.Listen("tcp", cfg.GRPCAddress)
+		if err != nil {
+			return fmt.Errorf("failed to create gRPC listener: %w", err)
+		}
+		grpcListener = tls.NewListener(rawListener, cfg.GRPCTLSConfig)
+	} else {
+		// Обычный TCP listener для gRPC без TLS
+		var err error
+		grpcListener, err = net.Listen("tcp", cfg.GRPCAddress)
+		if err != nil {
+			return fmt.Errorf("failed to create gRPC listener: %w", err)
+		}
 	}
 
 	// Запускаем HTTP сервер в горутине
 	go func() {
 		var err error
-		if isTLS {
-			logger.Info("Starting HTTPS server", zap.String("address", httpServer.Addr))
+		if cfg.IsTLS {
+			cfg.Logger.Info("Starting HTTPS server", zap.String("address", cfg.HTTPServer.Addr))
 			// Используем пустые строки для cert и key, так как они уже в TLSConfig
-			err = httpServer.ListenAndServeTLS("", "")
+			err = cfg.HTTPServer.ListenAndServeTLS("", "")
 		} else {
-			logger.Info("Starting HTTP server", zap.String("address", httpServer.Addr))
-			err = httpServer.ListenAndServe()
+			cfg.Logger.Info("Starting HTTP server", zap.String("address", cfg.HTTPServer.Addr))
+			err = cfg.HTTPServer.ListenAndServe()
 		}
 		if err != nil && err != http.ErrServerClosed {
 			serverErrors <- fmt.Errorf("HTTP server error: %w", err)
@@ -233,26 +291,30 @@ func runServersWithGracefulShutdown(ctx context.Context, httpServer *http.Server
 
 	// Запускаем gRPC сервер в горутине
 	go func() {
-		logger.Info("Starting gRPC server", zap.String("address", grpcAddress))
-		if err := grpcServer.Serve(grpcListener); err != nil {
+		if cfg.GRPCTLSConfig != nil {
+			cfg.Logger.Info("Starting gRPC server with TLS", zap.String("address", cfg.GRPCAddress))
+		} else {
+			cfg.Logger.Info("Starting gRPC server", zap.String("address", cfg.GRPCAddress))
+		}
+		if err := cfg.GRPCServer.Serve(grpcListener); err != nil {
 			serverErrors <- fmt.Errorf("gRPC server error: %w", err)
 		}
 	}()
 
 	// Ожидаем сигнал завершения через контекст или ошибку запуска
 	select {
-	case <-ctx.Done():
-		logger.Info("Received shutdown signal", zap.String("signal", ctx.Err().Error()))
-		return gracefulShutdown(ctx, httpServer, grpcServer, grpcListener, logger, service)
+	case <-cfg.Context.Done():
+		cfg.Logger.Info("Received shutdown signal", zap.String("signal", cfg.Context.Err().Error()))
+		return gracefulShutdown(cfg.Context, cfg.HTTPServer, cfg.GRPCServer, grpcListener, cfg.Logger, cfg.Service)
 	case err := <-serverErrors:
 		if err != nil {
 			// Если сервер не запустился, закрываем сервис перед возвратом ошибки
-			if closeErr := service.Close(); closeErr != nil {
-				logger.Error("Error closing service after server start failure", zap.Error(closeErr))
+			if closeErr := cfg.Service.Close(); closeErr != nil {
+				cfg.Logger.Error("Error closing service after server start failure", zap.Error(closeErr))
 			}
 			// Закрываем listener при ошибке
 			if closeErr := grpcListener.Close(); closeErr != nil {
-				logger.Error("Error closing gRPC listener after server start failure", zap.Error(closeErr))
+				cfg.Logger.Error("Error closing gRPC listener after server start failure", zap.Error(closeErr))
 			}
 			return fmt.Errorf("failed to start server: %w", err)
 		}
