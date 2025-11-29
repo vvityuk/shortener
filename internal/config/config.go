@@ -35,6 +35,17 @@ type Config struct {
 
 	// TLSKeyFile путь к файлу приватного ключа TLS (например, "server.key")
 	TLSKeyFile string `mapstructure:"tls_key_file"`
+
+	// TrustedSubnet строковое представление доверенной подсети в формате CIDR (например, "192.168.0.0/24")
+	// Используется для проверки доступа к internal эндпоинтам
+	TrustedSubnet string `mapstructure:"trusted_subnet"`
+
+	// GRPCAddress адрес и порт для запуска grpc-сервера (например, "localhost:3200")
+	GRPCAddress string `mapstructure:"grpc_address"`
+
+	// JWTSecretKey секретный ключ для подписи JWT токенов (минимум 32 символа)
+	// Должен быть установлен через переменную окружения JWT_SECRET_KEY или флаг --jwt-secret-key
+	JWTSecretKey string `mapstructure:"jwt_secret_key"`
 }
 
 // NewConfig создает новую конфигурацию приложения.
@@ -51,6 +62,7 @@ type Config struct {
 //	-c, -config: путь к JSON файлу конфигурации
 //	-cert: путь к файлу сертификата TLS (по умолчанию пусто, если не указан - генерируется автоматически)
 //	-key: путь к файлу приватного ключа TLS (по умолчанию пусто, если не указан - генерируется автоматически)
+//	-j, --jwt-secret-key: секретный ключ для подписи JWT токенов (минимум 32 символа, обязателен)
 //
 // Переменные окружения:
 //
@@ -62,6 +74,7 @@ type Config struct {
 //	ENABLE_HTTPS: включить HTTPS (значение "true" или "1")
 //	TLS_CERT_FILE: путь к файлу сертификата TLS (если не указан, генерируется автоматически)
 //	TLS_KEY_FILE: путь к файлу приватного ключа TLS (если не указан, генерируется автоматически)
+//	JWT_SECRET_KEY: секретный ключ для подписи JWT токенов (минимум 32 символа, обязателен)
 //
 // Формат JSON файла конфигурации:
 //
@@ -72,7 +85,10 @@ type Config struct {
 //	    "database_dsn": "",
 //	    "enable_https": false,
 //	    "tls_cert_file": "",
-//	    "tls_key_file": ""
+//	    "tls_key_file": "",
+//		"trusted_subnet": "",
+//		"grpc_address": "",
+//		"jwt_secret_key": "your-secret-key-minimum-32-characters-long"
 //	}
 //
 // Возвращает конфигурацию приложения или ошибку валидации конфигурации.
@@ -87,6 +103,9 @@ func NewConfig() (*Config, error) {
 	v.SetDefault("enable_https", false)
 	v.SetDefault("tls_cert_file", "")
 	v.SetDefault("tls_key_file", "")
+	v.SetDefault("trusted_subnet", "")
+	v.SetDefault("grpc_address", "localhost:3200")
+	v.SetDefault("jwt_secret_key", "")
 
 	// Настраиваем чтение переменных окружения
 	// Viper автоматически преобразует UPPER_CASE в lowercase с подчеркиваниями
@@ -104,6 +123,9 @@ func NewConfig() (*Config, error) {
 	enableHTTPSFlag := flags.BoolP("enable-https", "s", false, "enable HTTPS")
 	certFlag := flags.String("cert", "", "TLS certificate file")
 	keyFlag := flags.String("key", "", "TLS private key file")
+	keyTrustedSubnet := flags.String("t", "", "trusted subnet in CIDR notation")
+	grpcAddressFlag := flags.String("g", "", "grpc server address")
+	jwtSecretKeyFlag := flags.StringP("jwt-secret-key", "j", "", "JWT secret key for token signing (minimum 32 characters)")
 
 	// Парсим флаги из командной строки
 	if err := flags.Parse(os.Args[1:]); err != nil {
@@ -135,6 +157,15 @@ func NewConfig() (*Config, error) {
 	}
 	if flags.Changed("key") {
 		v.Set("tls_key_file", *keyFlag)
+	}
+	if flags.Changed("t") {
+		v.Set("trusted_subnet", *keyTrustedSubnet)
+	}
+	if flags.Changed("g") {
+		v.Set("grpc_address", *grpcAddressFlag)
+	}
+	if flags.Changed("jwt-secret-key") {
+		v.Set("jwt_secret_key", *jwtSecretKeyFlag)
 	}
 
 	// Определяем путь к конфигурационному файлу (приоритет: флаг > переменная окружения)
@@ -176,8 +207,8 @@ func NewConfig() (*Config, error) {
 // Это необходимо, т.к. Viper по умолчанию имеет приоритет flags > env > config > defaults,
 // а нам нужен env > flags > config > defaults.
 func applyEnvOverrides(v *viper.Viper) {
-	// Используем os.Getenv напрямую для проверки наличия переменных окружения
-	// и устанавливаем их через Set() для наивысшего приоритета
+	// Используем os.LookupEnv для проверки наличия переменных окружения
+	// (отличает пустую переменную от необъявленной) и устанавливаем их через Set() для наивысшего приоритета
 	envVars := map[string]string{
 		"SERVER_ADDRESS":    "server_address",
 		"BASE_URL":          "base_url",
@@ -185,16 +216,19 @@ func applyEnvOverrides(v *viper.Viper) {
 		"DATABASE_DSN":      "database_dsn",
 		"TLS_CERT_FILE":     "tls_cert_file",
 		"TLS_KEY_FILE":      "tls_key_file",
+		"TRUSTED_SUBNET":    "trusted_subnet",
+		"GRPC_ADDRESS":      "grpc_address",
+		"JWT_SECRET_KEY":    "jwt_secret_key",
 	}
 
 	for envKey, viperKey := range envVars {
-		if val := os.Getenv(envKey); val != "" {
+		if val, ok := os.LookupEnv(envKey); ok {
 			v.Set(viperKey, val)
 		}
 	}
 
 	// Специальная обработка для bool переменной
-	if val := os.Getenv("ENABLE_HTTPS"); val != "" {
+	if val, ok := os.LookupEnv("ENABLE_HTTPS"); ok {
 		v.Set("enable_https", val == "true" || val == "1")
 	}
 }
@@ -205,6 +239,12 @@ func (cfg *Config) validate() error {
 	}
 	if cfg.BaseURL == "" {
 		return fmt.Errorf("base URL is required")
+	}
+	if cfg.JWTSecretKey == "" {
+		return fmt.Errorf("JWT secret key is required")
+	}
+	if len(cfg.JWTSecretKey) < 32 {
+		return fmt.Errorf("JWT secret key must be at least 32 characters long")
 	}
 	// Файлы сертификатов не обязательны - если они не указаны или не существуют,
 	// будет сгенерирован самоподписанный сертификат автоматически

@@ -1,0 +1,51 @@
+syntax = "proto3";
+
+package shortener;
+
+option go_package = "github.com/vvityuk/shortener/pkg/grpc/pb";
+
+import "google/protobuf/empty.proto";
+
+// ShortenerService предоставляет методы для работы с сокращением URL через gRPC.
+service ShortenerService {
+  // ShortenURL создает короткий URL для переданного длинного URL
+  rpc ShortenURL (URLShortenRequest) returns (URLShortenResponse);
+  
+  // ExpandURL возвращает оригинальный URL по короткому коду
+  rpc ExpandURL (URLExpandRequest) returns (URLExpandResponse);
+  
+  // ListUserURLs возвращает список всех URL пользователя
+  rpc ListUserURLs (google.protobuf.Empty) returns (UserURLsResponse);
+}
+
+// URLShortenRequest запрос на создание короткого URL
+message URLShortenRequest {
+  string url = 1;
+}
+
+// URLShortenResponse ответ с коротким URL
+message URLShortenResponse {
+  string result = 1;
+}
+
+// URLExpandRequest запрос на получение оригинального URL
+message URLExpandRequest {
+  string id = 1;
+}
+
+// URLExpandResponse ответ с оригинальным URL
+message URLExpandResponse {
+  string result = 1;
+}
+
+// UserURLsResponse список URL пользователя
+message UserURLsResponse {
+  repeated URLData url = 1;
+}
+
+// URLData данные о URL
+message URLData {
+  string short_url = 1;
+  string original_url = 2;
+}
+

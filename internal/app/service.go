@@ -121,3 +121,14 @@ func (s *Service) BatchDelete(shortURLs []string, userID string) {
 		_ = s.storage.BatchDelete(shortURLs, userID)
 	}()
 }
+
+// GetStats возвращает статистику сервиса: количество сокращённых URL и количество пользователей.
+// Возвращает количество URL, количество пользователей и ошибку при получении статистики.
+func (s *Service) GetStats() (int, int, error) {
+	return s.storage.GetStats()
+}
+
+// GetBaseURL возвращает базовый URL для генерации коротких ссылок.
+func (s *Service) GetBaseURL() string {
+	return s.config.BaseURL
+}
