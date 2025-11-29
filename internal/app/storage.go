@@ -24,10 +24,7 @@ type Storage interface {
 // FileStorage реализует хранилище на основе JSON-файла.
 // Данные сохраняются в файл и загружаются при инициализации.
 type FileStorage struct {
-	urls map[string]struct {
-		OriginalURL string
-		UserID      string
-	}
+	urls map[string]urlData
 	file *os.File
 }
 
@@ -41,10 +38,7 @@ func NewStorage(filePath string) (*FileStorage, error) {
 	}
 
 	storage := &FileStorage{
-		urls: make(map[string]struct {
-			OriginalURL string
-			UserID      string
-		}),
+		urls: make(map[string]urlData),
 		file: file,
 	}
 
@@ -72,10 +66,7 @@ func (s *FileStorage) Save(key, value string, userID string) (string, bool, erro
 	if existingKey, ok := s.getKeyByValueAndUser(value, userID); ok {
 		return existingKey, false, nil
 	}
-	s.urls[key] = struct {
-		OriginalURL string
-		UserID      string
-	}{
+	s.urls[key] = urlData{
 		OriginalURL: value,
 		UserID:      userID,
 	}
@@ -180,35 +171,20 @@ func (s *FileStorage) BatchDelete(shortURLs []string, userID string) error {
 
 // GetStats возвращает статистику: количество сокращённых URL и количество пользователей.
 func (s *FileStorage) GetStats() (int, int, error) {
-	urlsCount := len(s.urls)
-
-	// Подсчитываем уникальных пользователей
-	users := make(map[string]struct{})
-	for _, data := range s.urls {
-		users[data.UserID] = struct{}{}
-	}
-	usersCount := len(users)
-
-	return urlsCount, usersCount, nil
+	return calculateStatsFromMap(s.urls)
 }
 
 // MemoryStorage реализует хранилище в оперативной памяти.
 // Данные не сохраняются между перезапусками приложения.
 type MemoryStorage struct {
-	urls map[string]struct {
-		OriginalURL string
-		UserID      string
-	}
+	urls map[string]urlData
 }
 
 // NewMemoryStorage создает новое хранилище в памяти.
 // Возвращает новый экземпляр хранилища в памяти.
 func NewMemoryStorage() *MemoryStorage {
 	return &MemoryStorage{
-		urls: make(map[string]struct {
-			OriginalURL string
-			UserID      string
-		}),
+		urls: make(map[string]urlData),
 	}
 }
 
@@ -228,10 +204,7 @@ func (s *MemoryStorage) Save(key, value string, userID string) (string, bool, er
 	if existingKey, ok := s.getKeyByValueAndUser(value, userID); ok {
 		return existingKey, false, nil
 	}
-	s.urls[key] = struct {
-		OriginalURL string
-		UserID      string
-	}{
+	s.urls[key] = urlData{
 		OriginalURL: value,
 		UserID:      userID,
 	}
@@ -307,11 +280,23 @@ func (s *MemoryStorage) BatchDelete(shortURLs []string, userID string) error {
 
 // GetStats возвращает статистику: количество сокращённых URL и количество пользователей.
 func (s *MemoryStorage) GetStats() (int, int, error) {
-	urlsCount := len(s.urls)
+	return calculateStatsFromMap(s.urls)
+}
+
+// urlData представляет структуру данных URL в хранилище.
+type urlData struct {
+	OriginalURL string
+	UserID      string
+}
+
+// calculateStatsFromMap подсчитывает статистику из map URL.
+// Возвращает количество URL и количество уникальных пользователей.
+func calculateStatsFromMap(urls map[string]urlData) (int, int, error) {
+	urlsCount := len(urls)
 
 	// Подсчитываем уникальных пользователей
 	users := make(map[string]struct{})
-	for _, data := range s.urls {
+	for _, data := range urls {
 		users[data.UserID] = struct{}{}
 	}
 	usersCount := len(users)
