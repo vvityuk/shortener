@@ -5,16 +5,84 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
+	"fmt"
 	"net/http"
+	"sync"
 	"time"
+
+	"github.com/golang-jwt/jwt/v5"
 )
 
-// Кнстанты системы.
+// Константы системы.
 const (
 	// ChiookieName имя cookie для хранения идентификатора пользователя
 	ChiookieName = "user_id"
-	secretKey    = "23ev43VRE35srv45" // Нужно будет перенести в конфиг
+	// jwtIssuer идентификатор издателя JWT токенов
+	jwtIssuer = "shortener-service"
+	// jwtTTL срок действия JWT токена (24 часа)
+	jwtTTL = 24 * time.Hour
 )
+
+// Ошибки валидации JWT токенов.
+var (
+	ErrTokenExpired      = errors.New("token expired")
+	ErrTokenInvalid      = errors.New("token invalid")
+	ErrTokenMalformed    = errors.New("token malformed")
+	ErrJWTNotInitialized = errors.New("JWT manager not initialized")
+)
+
+// Claims представляет структуру JWT токена.
+type Claims struct {
+	UserID string `json:"user_id"`
+	jwt.RegisteredClaims
+}
+
+// JWTManager управляет созданием и валидацией JWT токенов.
+type JWTManager struct {
+	secretKey []byte
+	issuer    string
+	ttl       time.Duration
+}
+
+var (
+	jwtManager *JWTManager
+	jwtOnce    sync.Once
+	jwtMutex   sync.RWMutex
+)
+
+// InitJWTManager инициализирует глобальный JWT Manager с указанным секретным ключом.
+// Должен быть вызван один раз при старте приложения.
+func InitJWTManager(secretKey string) error {
+	if secretKey == "" {
+		return fmt.Errorf("JWT secret key cannot be empty")
+	}
+	if len(secretKey) < 32 {
+		return fmt.Errorf("JWT secret key must be at least 32 characters long")
+	}
+
+	jwtOnce.Do(func() {
+		jwtMutex.Lock()
+		defer jwtMutex.Unlock()
+		jwtManager = &JWTManager{
+			secretKey: []byte(secretKey),
+			issuer:    jwtIssuer,
+			ttl:       jwtTTL,
+		}
+	})
+
+	return nil
+}
+
+// getJWTManager возвращает глобальный JWT Manager.
+func getJWTManager() (*JWTManager, error) {
+	jwtMutex.RLock()
+	defer jwtMutex.RUnlock()
+	if jwtManager == nil {
+		return nil, ErrJWTNotInitialized
+	}
+	return jwtManager, nil
+}
 
 // AuthMiddleware обеспечивает аутентификацию пользователей через cookie.
 // Если у пользователя нет валидной cookie, создается новая и устанавливается в ответ.
@@ -37,8 +105,15 @@ func AuthMiddleware(next http.Handler) http.Handler {
 	})
 }
 
+// generateUserID генерирует уникальный идентификатор пользователя.
 func generateUserID() string {
-	h := hmac.New(sha256.New, []byte(secretKey))
+	// Используем секретный ключ из JWT Manager, если он инициализирован
+	// Иначе используем временный ключ (для обратной совместимости при генерации userID)
+	secret := "23ev43VRE35srv45"
+	if mgr, err := getJWTManager(); err == nil {
+		secret = string(mgr.secretKey)
+	}
+	h := hmac.New(sha256.New, []byte(secret))
 	h.Write([]byte(time.Now().String()))
 	return hex.EncodeToString(h.Sum(nil))
 }
@@ -57,18 +132,69 @@ func GetUserID(r *http.Request) string {
 	return cookie.Value
 }
 
-// GenerateToken генерирует новый токен авторизации и возвращает userID и токен.
+// GenerateToken генерирует новый JWT токен авторизации и возвращает userID и токен.
 // Используется для аутентификации в gRPC.
 func GenerateToken() (string, string, error) {
+	mgr, err := getJWTManager()
+	if err != nil {
+		return "", "", err
+	}
+
 	userID := generateUserID()
-	return userID, userID, nil
+	now := time.Now()
+
+	claims := &Claims{
+		UserID: userID,
+		RegisteredClaims: jwt.RegisteredClaims{
+			ExpiresAt: jwt.NewNumericDate(now.Add(mgr.ttl)),
+			IssuedAt:  jwt.NewNumericDate(now),
+			Issuer:    mgr.issuer,
+		},
+	}
+
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	tokenString, err := token.SignedString(mgr.secretKey)
+	if err != nil {
+		return "", "", fmt.Errorf("failed to sign token: %w", err)
+	}
+
+	return userID, tokenString, nil
 }
 
-// ValidateToken проверяет валидность токена и возвращает userID.
-// Если токен невалидный, возвращает ошибку.
-func ValidateToken(token string) (string, error) {
-	if !isValidCookie(token) {
-		return "", http.ErrNoCookie
+// ValidateToken проверяет валидность JWT токена и возвращает userID.
+// Если токен невалидный, истек или поврежден, возвращает соответствующую ошибку.
+func ValidateToken(tokenString string) (string, error) {
+	mgr, err := getJWTManager()
+	if err != nil {
+		return "", err
 	}
-	return token, nil
+
+	// Парсим токен
+	token, err := jwt.ParseWithClaims(tokenString, &Claims{}, func(token *jwt.Token) (interface{}, error) {
+		// Проверяем алгоритм подписи
+		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
+		}
+		return mgr.secretKey, nil
+	})
+
+	if err != nil {
+		if errors.Is(err, jwt.ErrTokenExpired) {
+			return "", ErrTokenExpired
+		}
+		return "", fmt.Errorf("%w: %v", ErrTokenInvalid, err)
+	}
+
+	// Проверяем валидность токена и извлекаем claims
+	claims, ok := token.Claims.(*Claims)
+	if !ok || !token.Valid {
+		return "", ErrTokenInvalid
+	}
+
+	// Проверяем issuer
+	if claims.Issuer != mgr.issuer {
+		return "", ErrTokenInvalid
+	}
+
+	return claims.UserID, nil
 }

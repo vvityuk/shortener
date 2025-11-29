@@ -77,6 +77,11 @@ func run() error {
 		return fmt.Errorf("failed to initialize config: %w", err)
 	}
 
+	// Инициализация JWT Manager
+	if err := middleware.InitJWTManager(cfg.JWTSecretKey); err != nil {
+		return fmt.Errorf("failed to initialize JWT manager: %w", err)
+	}
+
 	// Инициализация сервиса и обработчиков
 	service, err := app.NewService(cfg)
 	if err != nil {

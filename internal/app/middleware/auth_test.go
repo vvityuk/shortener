@@ -1,8 +1,10 @@
 package middleware
 
 import (
+	"errors"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
 )
 
@@ -91,6 +93,138 @@ func TestGetUserID(t *testing.T) {
 			userID := GetUserID(req)
 			if userID != tt.expected {
 				t.Errorf("Expected user ID %s, got %s", tt.expected, userID)
+			}
+		})
+	}
+}
+
+func TestGenerateToken(t *testing.T) {
+	// Инициализируем JWT Manager для тестов
+	testSecretKey := "test-secret-key-minimum-32-characters-long"
+	if err := InitJWTManager(testSecretKey); err != nil {
+		t.Fatalf("Failed to initialize JWT manager: %v", err)
+	}
+
+	userID, token, err := GenerateToken()
+	if err != nil {
+		t.Fatalf("GenerateToken() error = %v, want nil", err)
+	}
+
+	if userID == "" {
+		t.Error("GenerateToken() userID is empty")
+	}
+
+	if token == "" {
+		t.Error("GenerateToken() token is empty")
+	}
+
+	// Проверяем, что токен валидный
+	validatedUserID, err := ValidateToken(token)
+	if err != nil {
+		t.Fatalf("ValidateToken() error = %v, want nil", err)
+	}
+
+	if validatedUserID != userID {
+		t.Errorf("ValidateToken() userID = %s, want %s", validatedUserID, userID)
+	}
+}
+
+func TestValidateToken(t *testing.T) {
+	// Инициализируем JWT Manager для тестов
+	testSecretKey := "test-secret-key-minimum-32-characters-long"
+	if err := InitJWTManager(testSecretKey); err != nil {
+		t.Fatalf("Failed to initialize JWT manager: %v", err)
+	}
+
+	tests := []struct {
+		name    string
+		setup   func() string
+		wantErr bool
+		errType error
+	}{
+		{
+			name: "Valid token",
+			setup: func() string {
+				_, token, _ := GenerateToken()
+				return token
+			},
+			wantErr: false,
+		},
+		{
+			name: "Invalid token - empty string",
+			setup: func() string {
+				return ""
+			},
+			wantErr: true,
+			errType: ErrTokenInvalid,
+		},
+		{
+			name: "Invalid token - malformed",
+			setup: func() string {
+				return "invalid.token.string"
+			},
+			wantErr: true,
+			errType: ErrTokenInvalid,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			token := tt.setup()
+			userID, err := ValidateToken(token)
+
+			if tt.wantErr {
+				if err == nil {
+					t.Error("ValidateToken() expected error, got nil")
+				}
+				if tt.errType != nil && !errors.Is(err, tt.errType) {
+					t.Errorf("ValidateToken() error = %v, want %v", err, tt.errType)
+				}
+			} else {
+				if err != nil {
+					t.Errorf("ValidateToken() error = %v, want nil", err)
+				}
+				if userID == "" {
+					t.Error("ValidateToken() userID is empty")
+				}
+			}
+		})
+	}
+}
+
+func TestInitJWTManager(t *testing.T) {
+	tests := []struct {
+		name      string
+		secretKey string
+		wantErr   bool
+	}{
+		{
+			name:      "Valid secret key",
+			secretKey: "valid-secret-key-minimum-32-characters-long",
+			wantErr:   false,
+		},
+		{
+			name:      "Empty secret key",
+			secretKey: "",
+			wantErr:   true,
+		},
+		{
+			name:      "Short secret key",
+			secretKey: "short",
+			wantErr:   true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Сбрасываем глобальное состояние для каждого теста
+			// Используем новый sync.Once для каждого теста
+			jwtManager = nil
+			jwtOnce = sync.Once{}
+
+			err := InitJWTManager(tt.secretKey)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("InitJWTManager() error = %v, wantErr %v", err, tt.wantErr)
 			}
 		})
 	}
